@@ -1,0 +1,45 @@
+name: ci-cd-gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Perf Smoke
+        env:
+          PERF_REQUESTS: "120"
+          PERF_CONCURRENCY: "12"
+          PERF_P95_MS: "8000"
+        run: npm run perf:smoke
+
+      - name: Conformance
+        run: npm run conformance
+
+      - name: Dependency Audit
+        run: npm audit --audit-level=high

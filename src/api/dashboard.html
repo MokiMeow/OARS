@@ -1,0 +1,1111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OARS Platform // Command</title>
+<style>
+@font-face {
+  font-family: 'Mono';
+  src: local('Cascadia Code'), local('SF Mono'), local('Fira Code'), local('JetBrains Mono'), local('Consolas'), local('monospace');
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-base: #08090d;
+  --bg-card: #0e1017;
+  --bg-card-hover: #131520;
+  --bg-elevated: #181b26;
+  --border: #1e2235;
+  --border-focus: #2a3050;
+  --text-primary: #e2e4ed;
+  --text-secondary: #7a7f96;
+  --text-muted: #484c62;
+  --accent-cyan: #22d3ee;
+  --accent-cyan-dim: rgba(34, 211, 238, 0.12);
+  --accent-green: #34d399;
+  --accent-green-dim: rgba(52, 211, 153, 0.12);
+  --accent-amber: #fbbf24;
+  --accent-amber-dim: rgba(251, 191, 36, 0.12);
+  --accent-red: #f87171;
+  --accent-red-dim: rgba(248, 113, 113, 0.12);
+  --accent-purple: #a78bfa;
+  --accent-purple-dim: rgba(167, 139, 250, 0.12);
+  --accent-blue: #60a5fa;
+  --accent-blue-dim: rgba(96, 165, 250, 0.12);
+  --radius: 8px;
+  --radius-lg: 12px;
+  --font-mono: 'Mono', 'Cascadia Code', 'SF Mono', 'Fira Code', monospace;
+  --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+html { font-size: 14px; }
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Subtle grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 60px 60px;
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Glow accent top bar */
+body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+  z-index: 100;
+}
+
+.app { position: relative; z-index: 1; }
+
+/* ---- HEADER ---- */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  background: rgba(8, 9, 13, 0.85);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.logo-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent-cyan), #0891b2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--bg-base);
+  letter-spacing: -0.5px;
+}
+
+.header-title {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.header-title span {
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-controls input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 7px 12px;
+  width: 220px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.header-controls input:focus {
+  border-color: var(--accent-cyan);
+}
+
+.header-controls input::placeholder {
+  color: var(--text-muted);
+}
+
+.btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: var(--border-focus);
+}
+
+.btn-primary {
+  background: rgba(34, 211, 238, 0.1);
+  border-color: rgba(34, 211, 238, 0.25);
+  color: var(--accent-cyan);
+}
+
+.btn-primary:hover {
+  background: rgba(34, 211, 238, 0.18);
+  border-color: rgba(34, 211, 238, 0.4);
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+}
+
+/* ---- STATUS BAR ---- */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 28px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(14, 16, 23, 0.6);
+}
+
+.status-bar .status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-bar .status-item .val {
+  color: var(--text-secondary);
+}
+
+.status-bar .status-item .val.ok { color: var(--accent-green); }
+.status-bar .status-item .val.warn { color: var(--accent-amber); }
+.status-bar .status-item .val.err { color: var(--accent-red); }
+
+/* ---- MAIN GRID ---- */
+.main {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+  padding: 20px 28px 40px;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+/* ---- CARD ---- */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.card:hover {
+  border-color: var(--border-focus);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.card-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.card-body {
+  padding: 16px 18px;
+}
+
+.card-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* ---- METRIC CARDS ---- */
+.metrics-row { grid-column: span 12; display: flex; gap: 16px; }
+
+.metric-card {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
+.metric-card.cyan::after { background: linear-gradient(90deg, var(--accent-cyan), transparent); }
+.metric-card.green::after { background: linear-gradient(90deg, var(--accent-green), transparent); }
+.metric-card.amber::after { background: linear-gradient(90deg, var(--accent-amber), transparent); }
+.metric-card.red::after { background: linear-gradient(90deg, var(--accent-red), transparent); }
+.metric-card.purple::after { background: linear-gradient(90deg, var(--accent-purple), transparent); }
+.metric-card.blue::after { background: linear-gradient(90deg, var(--accent-blue), transparent); }
+
+.metric-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.metric-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+/* ---- SPANS ---- */
+.span-4 { grid-column: span 4; }
+.span-5 { grid-column: span 5; }
+.span-6 { grid-column: span 6; }
+.span-7 { grid-column: span 7; }
+.span-8 { grid-column: span 8; }
+.span-12 { grid-column: span 12; }
+
+/* ---- ACTIONS TABLE ---- */
+.table-wrap {
+  overflow-x: auto;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.table-wrap::-webkit-scrollbar { width: 4px; }
+.table-wrap::-webkit-scrollbar-track { background: transparent; }
+.table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 1;
+}
+
+td {
+  padding: 9px 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(30, 34, 53, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+tr:hover td { background: rgba(255,255,255,0.015); }
+
+/* ---- STATUS BADGES ---- */
+.badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-executed { background: var(--accent-green-dim); color: var(--accent-green); }
+.badge-approved { background: var(--accent-blue-dim); color: var(--accent-blue); }
+.badge-denied { background: var(--accent-red-dim); color: var(--accent-red); }
+.badge-pending, .badge-requested { background: var(--accent-amber-dim); color: var(--accent-amber); }
+.badge-quarantined { background: var(--accent-purple-dim); color: var(--accent-purple); }
+.badge-failed { background: var(--accent-red-dim); color: var(--accent-red); }
+.badge-approval_required { background: var(--accent-amber-dim); color: var(--accent-amber); }
+.badge-canceled { background: rgba(100,100,100,0.15); color: var(--text-muted); }
+
+.badge-critical { background: var(--accent-red-dim); color: var(--accent-red); }
+.badge-high { background: rgba(251, 146, 60, 0.12); color: #fb923c; }
+.badge-medium { background: var(--accent-amber-dim); color: var(--accent-amber); }
+.badge-low { background: var(--accent-green-dim); color: var(--accent-green); }
+
+/* ---- RECEIPT VERIFY ---- */
+.verify-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.verify-panel input, .verify-panel textarea {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px 12px;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+.verify-panel input:focus, .verify-panel textarea:focus {
+  border-color: var(--accent-cyan);
+}
+
+.verify-result {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 12px;
+  border-radius: var(--radius);
+  min-height: 60px;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+}
+
+.verify-result.valid {
+  border-color: rgba(52, 211, 153, 0.3);
+  background: var(--accent-green-dim);
+  color: var(--accent-green);
+}
+
+.verify-result.invalid {
+  border-color: rgba(248, 113, 113, 0.3);
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+}
+
+/* ---- ALERT LIST ---- */
+.alert-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(30, 34, 53, 0.5);
+}
+
+.alert-item:last-child { border-bottom: none; }
+
+.alert-severity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.alert-severity-dot.critical { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
+.alert-severity-dot.high { background: #fb923c; box-shadow: 0 0 6px #fb923c; }
+.alert-severity-dot.medium { background: var(--accent-amber); }
+.alert-severity-dot.low { background: var(--accent-green); }
+
+.alert-content { flex: 1; min-width: 0; }
+.alert-code { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); font-weight: 500; }
+.alert-msg { font-size: 11px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alert-time { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+
+/* ---- POLICY CARDS ---- */
+.policy-item {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  transition: border-color 0.2s;
+}
+
+.policy-item:hover { border-color: var(--border-focus); }
+
+.policy-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.policy-name { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); font-weight: 500; }
+.policy-version { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.policy-rules { font-size: 11px; color: var(--text-muted); }
+
+.badge-published { background: var(--accent-green-dim); color: var(--accent-green); }
+.badge-draft { background: rgba(100,100,100,0.15); color: var(--text-muted); }
+
+/* ---- LEDGER STATUS ---- */
+.ledger-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(30, 34, 53, 0.4);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.ledger-stat:last-child { border-bottom: none; }
+.ledger-stat-label { color: var(--text-muted); }
+.ledger-stat-value { color: var(--text-secondary); }
+
+/* ---- SIEM STATUS ---- */
+.siem-target {
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(30, 34, 53, 0.4);
+}
+
+.siem-target:last-child { border-bottom: none; }
+
+.siem-target-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.siem-target-name { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); }
+.siem-target-stats { display: flex; gap: 12px; font-family: var(--font-mono); font-size: 11px; }
+.siem-stat-ok { color: var(--accent-green); }
+.siem-stat-err { color: var(--accent-red); }
+
+/* ---- TENANT LIST ---- */
+.tenant-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(30, 34, 53, 0.4);
+}
+
+.tenant-item:last-child { border-bottom: none; }
+
+.tenant-name { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); }
+.tenant-id { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+/* ---- LOADING / ERROR ---- */
+.loading {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 20px 0;
+  text-align: center;
+}
+
+.empty-state {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 28px 0;
+}
+
+/* ---- ANIMATIONS ---- */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.card { animation: fadeIn 0.3s ease forwards; }
+.card:nth-child(1) { animation-delay: 0s; }
+.card:nth-child(2) { animation-delay: 0.05s; }
+.card:nth-child(3) { animation-delay: 0.1s; }
+.card:nth-child(4) { animation-delay: 0.15s; }
+.card:nth-child(5) { animation-delay: 0.2s; }
+.card:nth-child(6) { animation-delay: 0.25s; }
+.card:nth-child(7) { animation-delay: 0.3s; }
+.card:nth-child(8) { animation-delay: 0.35s; }
+
+/* ---- RESPONSIVE ---- */
+@media (max-width: 1200px) {
+  .span-4, .span-5 { grid-column: span 6; }
+  .span-7, .span-8 { grid-column: span 6; }
+  .metrics-row { flex-wrap: wrap; }
+  .metric-card { min-width: calc(50% - 8px); }
+}
+
+@media (max-width: 768px) {
+  .main { grid-template-columns: 1fr; padding: 12px; gap: 12px; }
+  .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 1; }
+  .metrics-row { flex-direction: column; }
+  .header { flex-direction: column; gap: 10px; padding: 12px; }
+  .header-controls input { width: 100%; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="logo-mark">O</div>
+      <div class="header-title">OARS<span>// command</span></div>
+    </div>
+    <div class="header-controls">
+      <div class="pulse-dot" id="healthDot" title="System health"></div>
+      <input type="password" id="tokenInput" placeholder="Bearer token..." value="" autocomplete="off" />
+      <button class="btn btn-primary" onclick="refreshAll()">REFRESH</button>
+    </div>
+  </header>
+
+  <!-- STATUS BAR -->
+  <div class="status-bar">
+    <div class="status-item">SYS <span class="val ok" id="sysStatus">ONLINE</span></div>
+    <div class="status-item">UPTIME <span class="val" id="sysUptime">--</span></div>
+    <div class="status-item">LEDGER <span class="val" id="ledgerStatus">--</span></div>
+    <div class="status-item">SIEM <span class="val" id="siemStatus">--</span></div>
+    <div class="status-item">mTLS <span class="val" id="mtlsStatus">--</span></div>
+    <div class="status-item" style="margin-left:auto">LAST REFRESH <span class="val" id="lastRefresh">--</span></div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="main">
+
+    <!-- METRICS ROW -->
+    <div class="metrics-row">
+      <div class="metric-card cyan">
+        <div class="metric-label">Total Actions</div>
+        <div class="metric-value" id="metricActions">--</div>
+        <div class="metric-sub" id="metricActionsSub">loading...</div>
+      </div>
+      <div class="metric-card green">
+        <div class="metric-label">Receipts</div>
+        <div class="metric-value" id="metricReceipts">--</div>
+        <div class="metric-sub" id="metricReceiptsSub">signed & chained</div>
+      </div>
+      <div class="metric-card amber">
+        <div class="metric-label">Alerts (24h)</div>
+        <div class="metric-value" id="metricAlerts">--</div>
+        <div class="metric-sub" id="metricAlertsSub">loading...</div>
+      </div>
+      <div class="metric-card red">
+        <div class="metric-label">Security Events</div>
+        <div class="metric-value" id="metricEvents">--</div>
+        <div class="metric-sub" id="metricEventsSub">loading...</div>
+      </div>
+      <div class="metric-card purple">
+        <div class="metric-label">Policies</div>
+        <div class="metric-value" id="metricPolicies">--</div>
+        <div class="metric-sub" id="metricPoliciesSub">loading...</div>
+      </div>
+      <div class="metric-card blue">
+        <div class="metric-label">Tenants</div>
+        <div class="metric-value" id="metricTenants">--</div>
+        <div class="metric-sub" id="metricTenantsSub">active</div>
+      </div>
+    </div>
+
+    <!-- ACTIONS FEED -->
+    <div class="card span-8">
+      <div class="card-header">
+        <div class="card-title">Live Actions</div>
+        <span class="card-badge" style="background:var(--accent-cyan-dim);color:var(--accent-cyan)" id="actionCount">--</span>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap" id="actionsTable">
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Tenant</th><th>Tool</th><th>Operation</th><th>State</th><th>Time</th></tr>
+            </thead>
+            <tbody id="actionsBody">
+              <tr><td colspan="6" class="loading">Loading actions...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ALERTS -->
+    <div class="card span-4">
+      <div class="card-header">
+        <div class="card-title">Alerts</div>
+        <span class="card-badge" style="background:var(--accent-amber-dim);color:var(--accent-amber)" id="alertCount">--</span>
+      </div>
+      <div class="card-body" id="alertsBody" style="max-height:340px;overflow-y:auto">
+        <div class="loading">Loading alerts...</div>
+      </div>
+    </div>
+
+    <!-- POLICIES -->
+    <div class="card span-5">
+      <div class="card-header">
+        <div class="card-title">Policies</div>
+      </div>
+      <div class="card-body" id="policiesBody" style="max-height:300px;overflow-y:auto">
+        <div class="loading">Loading policies...</div>
+      </div>
+    </div>
+
+    <!-- RECEIPT VERIFY -->
+    <div class="card span-4">
+      <div class="card-header">
+        <div class="card-title">Receipt Verification</div>
+      </div>
+      <div class="card-body">
+        <div class="verify-panel">
+          <input type="text" id="verifyReceiptId" placeholder="Receipt ID (rct_...)" />
+          <button class="btn btn-primary" onclick="verifyReceipt()" style="align-self:flex-start">VERIFY</button>
+          <div class="verify-result" id="verifyResult">Enter a receipt ID to verify its integrity and signature chain.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEDGER INTEGRITY -->
+    <div class="card span-3">
+      <div class="card-header">
+        <div class="card-title">Ledger</div>
+      </div>
+      <div class="card-body" id="ledgerBody">
+        <div class="loading">Loading ledger status...</div>
+      </div>
+    </div>
+
+    <!-- SIEM STATUS -->
+    <div class="card span-5">
+      <div class="card-header">
+        <div class="card-title">SIEM Delivery</div>
+      </div>
+      <div class="card-body" id="siemBody" style="max-height:260px;overflow-y:auto">
+        <div class="loading">Loading SIEM status...</div>
+      </div>
+    </div>
+
+    <!-- TENANTS -->
+    <div class="card span-4">
+      <div class="card-header">
+        <div class="card-title">Tenants</div>
+      </div>
+      <div class="card-body" id="tenantsBody" style="max-height:260px;overflow-y:auto">
+        <div class="loading">Loading tenants...</div>
+      </div>
+    </div>
+
+    <!-- CONNECTORS -->
+    <div class="card span-3">
+      <div class="card-header">
+        <div class="card-title">Connectors</div>
+      </div>
+      <div class="card-body" id="connectorsBody">
+        <div class="loading">Loading connectors...</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+let currentTenant = 'tenant_alpha';
+
+function getToken() {
+  return document.getElementById('tokenInput').value.trim();
+}
+
+async function apiFetch(path) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Authorization': `Bearer ${getToken()}` }
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+function relativeTime(isoStr) {
+  if (!isoStr) return '--';
+  const diff = Date.now() - new Date(isoStr).getTime();
+  if (diff < 60000) return `${Math.floor(diff/1000)}s ago`;
+  if (diff < 3600000) return `${Math.floor(diff/60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff/3600000)}h ago`;
+  return `${Math.floor(diff/86400000)}d ago`;
+}
+
+function shortId(id) {
+  if (!id) return '--';
+  if (id.length <= 16) return id;
+  return id.slice(0, 12) + '...';
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ---- HEALTH ----
+async function loadHealth() {
+  try {
+    const data = await fetch(`${API_BASE}/health`).then(r => r.json());
+    document.getElementById('sysStatus').textContent = data.status === 'ok' ? 'ONLINE' : 'DEGRADED';
+    document.getElementById('sysStatus').className = data.status === 'ok' ? 'val ok' : 'val warn';
+    document.getElementById('healthDot').style.background = data.status === 'ok' ? 'var(--accent-green)' : 'var(--accent-amber)';
+    document.getElementById('sysUptime').textContent = relativeTime(data.timestamp);
+  } catch {
+    document.getElementById('sysStatus').textContent = 'OFFLINE';
+    document.getElementById('sysStatus').className = 'val err';
+  }
+}
+
+// ---- DASHBOARD (ops) ----
+async function loadDashboard() {
+  try {
+    const data = await apiFetch(`/v1/admin/ops/dashboard?tenantId=${currentTenant}`);
+    const d = data;
+
+    // Metrics
+    const totalActions = (d.actionsByState || []).reduce((s, x) => s + (x.count || 0), 0);
+    document.getElementById('metricActions').textContent = totalActions;
+    const stateBreakdown = (d.actionsByState || []).map(s => `${s.count} ${s.state}`).join(', ') || 'no data';
+    document.getElementById('metricActionsSub').textContent = stateBreakdown.slice(0, 50);
+
+    const alertTotal = (d.alertsBySeverity || []).reduce((s, x) => s + (x.count || 0), 0);
+    document.getElementById('metricAlerts').textContent = alertTotal;
+    const alertBreakdown = (d.alertsBySeverity || []).map(s => `${s.count} ${s.severity}`).join(', ') || 'none';
+    document.getElementById('metricAlertsSub').textContent = alertBreakdown.slice(0, 50);
+
+    const eventCount = d.securityEventsLast24h ?? d.securityEvents24h ?? '--';
+    document.getElementById('metricEvents').textContent = eventCount;
+    document.getElementById('metricEventsSub').textContent = 'last 24 hours';
+
+    // SIEM status bar
+    if (d.siem) {
+      const siemOk = d.siem.targets?.length > 0;
+      document.getElementById('siemStatus').textContent = siemOk ? `${d.siem.targets.length} TARGETS` : 'NO TARGETS';
+      document.getElementById('siemStatus').className = siemOk ? 'val ok' : 'val warn';
+    }
+
+    // mTLS status bar
+    if (d.mtls || d.workloadIdentity) {
+      const mtls = d.mtls || d.workloadIdentity;
+      const enabled = mtls.enabled ?? mtls.enforced ?? false;
+      document.getElementById('mtlsStatus').textContent = enabled ? 'ENFORCED' : 'DISABLED';
+      document.getElementById('mtlsStatus').className = enabled ? 'val ok' : 'val warn';
+    }
+
+  } catch (err) {
+    console.warn('Dashboard load failed:', err.message);
+  }
+}
+
+// ---- ACTIONS ----
+async function loadActions() {
+  try {
+    const data = await apiFetch(`/v1/receipts?tenantId=${currentTenant}&limit=50`);
+    const items = data.items || data || [];
+    document.getElementById('actionCount').textContent = items.length;
+    document.getElementById('metricReceipts').textContent = items.length;
+
+    if (items.length === 0) {
+      document.getElementById('actionsBody').innerHTML = '<tr><td colspan="6" class="empty-state">No actions recorded yet. Submit an action via the API.</td></tr>';
+      return;
+    }
+
+    document.getElementById('actionsBody').innerHTML = items.map(r => `
+      <tr>
+        <td title="${escapeHtml(r.actionId || r.id || '')}">${escapeHtml(shortId(r.actionId || r.id))}</td>
+        <td>${escapeHtml(shortId(r.tenantId || ''))}</td>
+        <td>${escapeHtml(r.resource?.toolId || r.toolId || '--')}</td>
+        <td>${escapeHtml(r.resource?.operation || r.operation || r.type || '--')}</td>
+        <td><span class="badge badge-${(r.state || r.type || '').replace('action.','')}">${escapeHtml(r.state || r.type || '--')}</span></td>
+        <td>${relativeTime(r.timestamp || r.createdAt)}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    document.getElementById('actionsBody').innerHTML = `<tr><td colspan="6" class="loading">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+// ---- ALERTS ----
+async function loadAlerts() {
+  try {
+    const data = await apiFetch(`/v1/alerts?tenantId=${currentTenant}&limit=20`);
+    const items = data.items || data || [];
+    document.getElementById('alertCount').textContent = items.length;
+
+    if (items.length === 0) {
+      document.getElementById('alertsBody').innerHTML = '<div class="empty-state">No alerts. System is clean.</div>';
+      return;
+    }
+
+    document.getElementById('alertsBody').innerHTML = items.map(a => `
+      <div class="alert-item">
+        <div class="alert-severity-dot ${a.severity || 'low'}"></div>
+        <div class="alert-content">
+          <div class="alert-code">${escapeHtml(a.code || '--')}<span class="badge badge-${a.severity}" style="margin-left:8px">${escapeHtml(a.severity || 'low')}</span></div>
+          <div class="alert-msg">${escapeHtml(a.message || '')}</div>
+        </div>
+        <div class="alert-time">${relativeTime(a.createdAt)}</div>
+      </div>
+    `).join('');
+  } catch (err) {
+    document.getElementById('alertsBody').innerHTML = `<div class="loading">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---- POLICIES ----
+async function loadPolicies() {
+  try {
+    const data = await apiFetch(`/v1/policies?tenantId=${currentTenant}`);
+    const items = data.items || data || [];
+    document.getElementById('metricPolicies').textContent = items.length;
+    document.getElementById('metricPoliciesSub').textContent = `${items.filter(p => p.status === 'published').length} published`;
+
+    if (items.length === 0) {
+      document.getElementById('policiesBody').innerHTML = '<div class="empty-state">No custom policies. Using default baseline.</div>';
+      return;
+    }
+
+    document.getElementById('policiesBody').innerHTML = items.map(p => `
+      <div class="policy-item">
+        <div class="policy-item-header">
+          <div class="policy-name">${escapeHtml(shortId(p.id))}</div>
+          <span class="badge badge-${p.status}">${escapeHtml(p.status)}</span>
+        </div>
+        <div class="policy-version">v${escapeHtml(p.version || '--')} &middot; ${(p.rules || []).length} rules</div>
+      </div>
+    `).join('');
+  } catch (err) {
+    document.getElementById('policiesBody').innerHTML = `<div class="loading">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---- RECEIPT VERIFY ----
+async function verifyReceipt() {
+  const receiptId = document.getElementById('verifyReceiptId').value.trim();
+  const resultEl = document.getElementById('verifyResult');
+  if (!receiptId) {
+    resultEl.className = 'verify-result';
+    resultEl.textContent = 'Please enter a receipt ID.';
+    return;
+  }
+  resultEl.className = 'verify-result';
+  resultEl.textContent = 'Verifying...';
+  try {
+    const data = await apiFetch(`/v1/receipts/${receiptId}`);
+    const verifyRes = await fetch(`${API_BASE}/v1/receipts/verify`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ receiptId })
+    }).then(r => r.json());
+
+    const isValid = verifyRes.valid ?? verifyRes.isHashValid ?? verifyRes.isSignatureValid ?? false;
+    resultEl.className = isValid ? 'verify-result valid' : 'verify-result invalid';
+    resultEl.innerHTML = isValid
+      ? `VALID &mdash; Receipt ${escapeHtml(shortId(receiptId))} integrity verified.<br>Hash: ${escapeHtml((verifyRes.receiptHash || data.integrity?.receiptHash || '--').slice(0,24))}...`
+      : `INVALID &mdash; Verification failed for ${escapeHtml(shortId(receiptId))}.<br>${escapeHtml(JSON.stringify(verifyRes.errors || verifyRes.error || 'Unknown error').slice(0, 150))}`;
+  } catch (err) {
+    resultEl.className = 'verify-result invalid';
+    resultEl.textContent = `Error: ${err.message}`;
+  }
+}
+
+// ---- LEDGER ----
+async function loadLedger() {
+  try {
+    const data = await apiFetch('/v1/admin/ledger/status');
+    const verify = await apiFetch('/v1/admin/ledger/verify');
+
+    const isValid = verify.isValid ?? verify.valid ?? true;
+    document.getElementById('ledgerStatus').textContent = isValid ? 'VALID' : 'TAMPERED';
+    document.getElementById('ledgerStatus').className = isValid ? 'val ok' : 'val err';
+
+    document.getElementById('ledgerBody').innerHTML = `
+      <div class="ledger-stat"><span class="ledger-stat-label">Total Entries</span><span class="ledger-stat-value">${data.totalEntries ?? '--'}</span></div>
+      <div class="ledger-stat"><span class="ledger-stat-label">Last Sequence</span><span class="ledger-stat-value">${data.lastSequence ?? '--'}</span></div>
+      <div class="ledger-stat"><span class="ledger-stat-label">Integrity</span><span class="ledger-stat-value" style="color:${isValid ? 'var(--accent-green)' : 'var(--accent-red)'}">${isValid ? 'VERIFIED' : 'FAILED'}</span></div>
+      <div class="ledger-stat"><span class="ledger-stat-label">Checked</span><span class="ledger-stat-value">${verify.checkedEntries ?? '--'} entries</span></div>
+      <div class="ledger-stat"><span class="ledger-stat-label">Errors</span><span class="ledger-stat-value" style="color:${(verify.errors || []).length > 0 ? 'var(--accent-red)' : 'var(--accent-green)'}">${(verify.errors || []).length}</span></div>
+    `;
+  } catch (err) {
+    document.getElementById('ledgerBody').innerHTML = `<div class="loading">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---- SIEM ----
+async function loadSiem() {
+  try {
+    const data = await apiFetch('/v1/admin/siem/status');
+    const targets = data.targets || [];
+
+    if (targets.length === 0) {
+      document.getElementById('siemBody').innerHTML = `
+        <div class="empty-state">No SIEM targets configured.<br><span style="color:var(--text-muted)">Set OARS_SIEM_TARGETS to enable.</span></div>
+      `;
+      return;
+    }
+
+    document.getElementById('siemBody').innerHTML = targets.map(t => `
+      <div class="siem-target">
+        <div class="siem-target-header">
+          <span class="siem-target-name">${escapeHtml(t.id || t.type)}</span>
+          <span class="badge" style="background:${t.enabled !== false ? 'var(--accent-green-dim)' : 'rgba(100,100,100,0.15)'};color:${t.enabled !== false ? 'var(--accent-green)' : 'var(--text-muted)'}">${t.enabled !== false ? 'active' : 'disabled'}</span>
+        </div>
+        <div class="siem-target-stats">
+          <span class="siem-stat-ok">${t.successCount ?? 0} ok</span>
+          <span class="siem-stat-err">${t.failureCount ?? 0} failed</span>
+          ${t.lastSuccessAt ? `<span style="color:var(--text-muted)">${relativeTime(t.lastSuccessAt)}</span>` : ''}
+        </div>
+      </div>
+    `).join('') + `
+      <div class="ledger-stat" style="margin-top:10px"><span class="ledger-stat-label">Queue Length</span><span class="ledger-stat-value">${data.queueLength ?? 0}</span></div>
+      <div class="ledger-stat"><span class="ledger-stat-label">Retry</span><span class="ledger-stat-value">${data.retry?.running ? 'Running' : 'Stopped'}</span></div>
+    `;
+  } catch (err) {
+    document.getElementById('siemBody').innerHTML = `<div class="loading">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---- TENANTS ----
+async function loadTenants() {
+  try {
+    const data = await apiFetch('/v1/admin/tenants');
+    const items = data.items || data || [];
+    document.getElementById('metricTenants').textContent = items.length;
+
+    if (items.length === 0) {
+      document.getElementById('tenantsBody').innerHTML = '<div class="empty-state">No tenants provisioned yet.</div>';
+      return;
+    }
+
+    document.getElementById('tenantsBody').innerHTML = items.map(t => `
+      <div class="tenant-item">
+        <div>
+          <div class="tenant-name">${escapeHtml(t.name || t.id || '--')}</div>
+          <div class="tenant-id">${escapeHtml(t.id || '--')}</div>
+        </div>
+        <button class="btn" style="font-size:10px;padding:4px 10px" onclick="switchTenant('${escapeHtml(t.id)}')">VIEW</button>
+      </div>
+    `).join('');
+  } catch (err) {
+    document.getElementById('tenantsBody').innerHTML = `<div class="loading">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ---- CONNECTORS ----
+async function loadConnectors() {
+  try {
+    const data = await apiFetch('/v1/connectors');
+    const items = data.items || data.connectors || data || [];
+
+    if (!Array.isArray(items) || items.length === 0) {
+      document.getElementById('connectorsBody').innerHTML = '<div class="empty-state">No connectors registered.</div>';
+      return;
+    }
+
+    document.getElementById('connectorsBody').innerHTML = items.map(c => `
+      <div class="ledger-stat">
+        <span class="ledger-stat-label" style="color:var(--text-primary)">${escapeHtml(typeof c === 'string' ? c : (c.toolId || c.id || '--'))}</span>
+        <span class="badge badge-executed">active</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    document.getElementById('connectorsBody').innerHTML = `<div class="loading">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function switchTenant(tenantId) {
+  currentTenant = tenantId;
+  refreshAll();
+}
+
+async function refreshAll() {
+  document.getElementById('lastRefresh').textContent = new Date().toLocaleTimeString();
+  await Promise.allSettled([
+    loadHealth(),
+    loadDashboard(),
+    loadActions(),
+    loadAlerts(),
+    loadPolicies(),
+    loadLedger(),
+    loadSiem(),
+    loadTenants(),
+    loadConnectors()
+  ]);
+}
+
+// Initial load
+refreshAll();
+
+// Auto-refresh every 15 seconds
+setInterval(refreshAll, 15000);
+</script>
+</body>
+</html>

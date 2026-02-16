@@ -1,0 +1,44 @@
+{
+  "profile": "oars-core",
+  "version": "1.0.0",
+  "releaseDate": "2026-02-14",
+  "compatibilityPolicy": "open-spec/compatibility-policy.md",
+  "requiredEndpoints": [
+    {
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/actions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/actions/:actionId"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/receipts/verify"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/ledger/verify"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/trust/tenants/:tenantId/keys"
+    }
+  ],
+  "requiredSecurityCapabilities": [
+    "tenant_access_enforcement",
+    "signed_receipts",
+    "immutable_ledger_verification",
+    "approval_step_up_authentication",
+    "workload_identity_mtls_enforcement"
+  ],
+  "conformance": {
+    "script": "npm run conformance",
+    "minimumChecks": 4,
+    "requiredPassRate": 1
+  }
+}

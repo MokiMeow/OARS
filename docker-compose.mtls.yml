@@ -1,0 +1,37 @@
+services:
+  certgen:
+    image: alpine:3.20
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl >/dev/null && /scripts/mtls/certgen.sh"]
+    environment:
+      CERT_DIR: "/certs"
+      CA_CN: "oars-dev-ca"
+      SERVER_CN: "oars"
+      CLIENT_CN: "oars-worker"
+    volumes:
+      - ./data/mtls-certs:/certs
+      - ./scripts:/scripts:ro
+
+  oars:
+    build: .
+    ports:
+      - "8443:8443"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8443"
+      NODE_ENV: "development"
+      OARS_MTLS_ENABLED: "true"
+      OARS_MTLS_MODE: "tls"
+      OARS_MTLS_CA_PATH: "/certs/ca.crt"
+      OARS_MTLS_TRUSTED_IDENTITIES_FILE: "/certs/trusted-identities.json"
+      OARS_TLS_CERT_PATH: "/certs/server.crt"
+      OARS_TLS_KEY_PATH: "/certs/server.key"
+      # Recommended in production (32+ bytes base64):
+      # OARS_DATA_ENCRYPTION_KEY: "base64:..."
+    volumes:
+      - ./data:/app/data
+      - ./data/mtls-certs:/certs:ro
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+
+ 

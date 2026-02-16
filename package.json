@@ -1,0 +1,58 @@
+{
+  "name": "oars-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OARS platform backend foundation",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "default": "./dist/sdk/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "worker:dev": "tsx watch src/worker/index.ts",
+    "start": "node dist/index.js",
+    "worker": "node dist/worker/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:docker": "tsx scripts/test-docker.ts",
+    "perf:smoke": "tsx scripts/perf-smoke.ts",
+    "conformance": "tsx scripts/conformance-suite.ts",
+    "release:gate": "tsx scripts/release-gate.ts",
+    "security:check": "tsx scripts/security-check.ts",
+    "backup:create": "tsx scripts/backup-job.ts",
+    "backup:restore": "tsx scripts/restore-job.ts",
+    "backup:drill": "tsx scripts/dr-drill-job.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "fastify": "^5.3.0",
+    "pg": "^8.18.0",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.16.0",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.1.4",
+    "testcontainers": "^11.11.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.7"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
