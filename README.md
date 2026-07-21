@@ -11,7 +11,9 @@ The platform delivers:
 
 ## Repository Goal
 
-This repository is organized as an execution-ready documentation base for building OARS end-to-end, not as an MVP.
+This repository contains the production-oriented TypeScript reference implementation,
+SDK, conformance suite, operational tooling, and execution-ready documentation for
+building OARS end-to-end.
 
 ## Documentation Index
 
@@ -74,8 +76,10 @@ It provides:
 
 ## Local Run
 
+Node.js 24 and npm 11.16 are required.
+
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -100,6 +104,7 @@ docker compose -f docker-compose.postgres.yml up --build
 
 Useful commands:
 
+- `npm run check` (type-check, unit/integration tests, and build)
 - `npm run typecheck`
 - `npm test`
 - `npm run security:check`

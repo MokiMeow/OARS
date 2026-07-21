@@ -2,6 +2,7 @@
   "name": "oars-platform",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.16.0",
   "description": "OARS platform backend foundation",
   "license": "Apache-2.0",
   "type": "module",
@@ -34,25 +35,35 @@
     "backup:create": "tsx scripts/backup-job.ts",
     "backup:restore": "tsx scripts/restore-job.ts",
     "backup:drill": "tsx scripts/dr-drill-job.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "fastify": "^5.3.0",
-    "pg": "^8.18.0",
-    "zod": "^4.1.11"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "fastify": "^5.10.0",
+    "pg": "^8.22.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.2.3",
-    "@types/pg": "^8.16.0",
-    "@types/supertest": "^6.0.3",
+    "@types/node": "^24.13.3",
+    "@types/pg": "^8.20.0",
+    "@types/supertest": "^7.2.1",
     "supertest": "^7.1.4",
-    "testcontainers": "^11.11.0",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.7"
+    "testcontainers": "^12.0.4",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "cpu-features": false,
+    "protobufjs": false,
+    "ssh2": false
   }
 }
