@@ -21,6 +21,7 @@ SCIM sync is treated as enterprise identity reconciliation, but the current impl
 
 - `src/core/services/scim-service.ts:233-270` resolves active group memberships and only calls `upsertMember`.
 - `src/core/services/scim-service.ts:272-286` reports assigned/inactive/unmapped counts but no removals.
+- `src/core/services/scim-service.ts:146-166` deprovisions a SCIM user and unconditionally removes the same-named tenant member; when that member is an owner, the owner is deleted.
 - `src/core/services/tenant-admin-service.ts:105-122` provides `listMembers` and audited `removeMember` methods.
 - Existing core excerpt:
 
@@ -50,7 +51,7 @@ for (const [subject, role] of resolvedBySubject.entries()) {
 
 **Out of scope**:
 - Database schema changes or a new membership-source field.
-- Removing tenant owners.
+- Allowing any SCIM sync or deprovision workflow to remove or demote tenant owners.
 - Removing subjects that do not correspond to a known SCIM user.
 - Changing role-priority semantics (`admin > operator > auditor`).
 
@@ -84,6 +85,10 @@ Extend the test at `tests/api.test.ts:2711` so a user is first granted through a
 
 Record authoritative membership reconciliation as implemented, including the boundary: only subjects represented by SCIM users are revoked automatically; owners and unrelated manual members are preserved.
 
+### Step 5: Protect owners during explicit SCIM deprovision
+
+Before removing the tenant member in `deprovisionUser`, inspect the matching membership. Preserve existing behavior for non-owner subjects, but never delete a tenant owner whose subject collides with the SCIM username. The SCIM user may still be marked inactive. Extend the end-to-end SCIM test to deprovision the owner-collision user and assert the owner remains.
+
 **Verify**: `npm run check` → exit 0.
 
 ## Test plan
@@ -93,11 +98,13 @@ Record authoritative membership reconciliation as implemented, including the bou
 - Previously assigned SCIM-known user removed from all mapped groups is revoked.
 - Manual non-SCIM member survives.
 - Owner survives.
+- Owner also survives explicit SCIM deprovision when its subject collides with a SCIM username.
 - Completion event/result includes `removedCount`.
 
 ## Done criteria
 
 - [ ] Reconciliation revokes stale access only inside the defined SCIM boundary.
+- [ ] SCIM deprovision cannot remove a tenant owner.
 - [ ] Existing response fields remain compatible and `removedCount` is additive.
 - [ ] Target and full test gates pass.
 - [ ] Only in-scope files change.
