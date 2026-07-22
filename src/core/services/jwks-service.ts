@@ -17,10 +17,21 @@ interface OidcMetadata {
 
 interface FetchResponseLike {
   ok: boolean;
+  status?: number | undefined;
   json: () => Promise<unknown>;
 }
 
-type FetchLike = (input: string) => Promise<FetchResponseLike>;
+type FetchLike = (input: string, init?: RequestInit) => Promise<FetchResponseLike>;
+type SleepLike = (ms: number) => Promise<void>;
+
+type JsonRequestResult =
+  | { ok: true; body: unknown }
+  | { ok: false; kind: "http" | "invalid_json" | "network_or_timeout" };
+
+type FetchAttemptResult =
+  | { kind: "success"; body: unknown }
+  | { kind: "http"; status: number | undefined }
+  | { kind: "invalid_json" };
 
 export interface TrustedJwksProviderConfig {
   issuer: string;
@@ -64,7 +75,22 @@ export interface JwksServiceOptions {
   rawTrustedJwksConfig?: string | undefined;
   trustedProviders?: TrustedJwksProviderConfig[] | undefined;
   fetchFn?: FetchLike | undefined;
+  requestTimeoutMs?: number | undefined;
+  maxRefreshAttempts?: number | undefined;
+  sleepFn?: SleepLike | undefined;
   autoRefresh?: AutoRefreshOptions | undefined;
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
+const DEFAULT_MAX_REFRESH_ATTEMPTS = 2;
+const MIN_REQUEST_TIMEOUT_MS = 100;
+const MAX_REQUEST_TIMEOUT_MS = 30_000;
+const MIN_REFRESH_ATTEMPTS = 1;
+const MAX_REFRESH_ATTEMPTS = 5;
+const MAX_RETRY_BACKOFF_MS = 2_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isValidProvider(value: unknown): value is TrustedJwksProviderConfig {
@@ -126,6 +152,30 @@ function parseInterval(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
+function parseBoundedInteger(
+  value: number | string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number
+): number {
+  if (value === undefined || value === "") {
+    return fallback;
+  }
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function shouldRetryStatus(status: number | undefined): boolean {
+  return status === 408 || status === 425 || status === 429 || (status !== undefined && status >= 500 && status <= 599);
+}
+
+function retryBackoffMs(attempt: number): number {
+  return Math.min(100 * 2 ** (attempt - 1), MAX_RETRY_BACKOFF_MS);
+}
+
 function defaultDiscoveryUrl(issuer: string): string {
   const normalized = issuer.endsWith("/") ? issuer.slice(0, -1) : issuer;
   return `${normalized}/.well-known/openid-configuration`;
@@ -134,6 +184,9 @@ function defaultDiscoveryUrl(issuer: string): string {
 export class JwksService {
   private readonly providers = new Map<string, TrustedProviderState>();
   private readonly fetchFn: FetchLike;
+  private readonly requestTimeoutMs: number;
+  private readonly maxRefreshAttempts: number;
+  private readonly sleepFn: SleepLike;
   private scheduler: SchedulerState = {
     running: false,
     intervalSeconds: 300,
@@ -161,6 +214,19 @@ export class JwksService {
     }
 
     this.fetchFn = options?.fetchFn ?? (fetch as unknown as FetchLike);
+    this.requestTimeoutMs = parseBoundedInteger(
+      options?.requestTimeoutMs ?? process.env.OARS_JWKS_REQUEST_TIMEOUT_MS,
+      DEFAULT_REQUEST_TIMEOUT_MS,
+      MIN_REQUEST_TIMEOUT_MS,
+      MAX_REQUEST_TIMEOUT_MS
+    );
+    this.maxRefreshAttempts = parseBoundedInteger(
+      options?.maxRefreshAttempts ?? process.env.OARS_JWKS_MAX_REFRESH_ATTEMPTS,
+      DEFAULT_MAX_REFRESH_ATTEMPTS,
+      MIN_REFRESH_ATTEMPTS,
+      MAX_REFRESH_ATTEMPTS
+    );
+    this.sleepFn = options?.sleepFn ?? sleep;
 
     const autoRefreshEnabled =
       options?.autoRefresh?.enabled ?? parseBoolean(process.env.OARS_JWKS_AUTO_REFRESH_ENABLED, false);
@@ -219,12 +285,15 @@ export class JwksService {
     const discoveryUrl = provider.discoveryUrl ?? defaultDiscoveryUrl(provider.issuer);
 
     try {
-      const response = await this.fetchFn(discoveryUrl);
-      if (!response.ok) {
-        provider.lastError = `Discovery request failed for ${issuer}`;
+      const result = await this.requestJson(discoveryUrl);
+      if (!result.ok) {
+        provider.lastError =
+          result.kind === "invalid_json"
+            ? `Invalid discovery response for ${issuer}`
+            : `Discovery request failed for ${issuer}`;
         return false;
       }
-      const body = (await response.json()) as OidcMetadata;
+      const body = result.body as OidcMetadata;
       if (!body.jwks_uri || typeof body.jwks_uri !== "string") {
         provider.lastError = `Invalid discovery metadata for ${issuer}`;
         return false;
@@ -276,12 +345,15 @@ export class JwksService {
     }
 
     try {
-      const response = await this.fetchFn(provider.jwksUri);
-      if (!response.ok) {
-        provider.lastError = `JWKS refresh request failed for ${issuer}`;
+      const result = await this.requestJson(provider.jwksUri);
+      if (!result.ok) {
+        provider.lastError =
+          result.kind === "invalid_json"
+            ? `JWKS response invalid for ${issuer}`
+            : `JWKS refresh request failed for ${issuer}`;
         return false;
       }
-      const body = (await response.json()) as Partial<JwksDocument>;
+      const body = result.body as Partial<JwksDocument>;
       if (!Array.isArray(body.keys)) {
         provider.lastError = `JWKS payload invalid for ${issuer}`;
         return false;
@@ -376,18 +448,78 @@ export class JwksService {
       return;
     }
     this.scheduler.inProgress = true;
-    const discovered = discoverFirst
-      ? await this.discoverAll()
-      : { discoveredIssuers: [] as string[], failedDiscoveries: [] as string[] };
-    const refreshed = await this.refreshAll();
-    this.scheduler.tickCount += 1;
-    this.scheduler.lastRunAt = new Date().toISOString();
-    this.scheduler.lastResult = {
-      discoveredIssuers: discovered.discoveredIssuers,
-      failedDiscoveries: discovered.failedDiscoveries,
-      refreshedIssuers: refreshed.refreshedIssuers,
-      failedIssuers: refreshed.failedIssuers
-    };
-    this.scheduler.inProgress = false;
+    try {
+      const discovered = discoverFirst
+        ? await this.discoverAll()
+        : { discoveredIssuers: [] as string[], failedDiscoveries: [] as string[] };
+      const refreshed = await this.refreshAll();
+      this.scheduler.tickCount += 1;
+      this.scheduler.lastRunAt = new Date().toISOString();
+      this.scheduler.lastResult = {
+        discoveredIssuers: discovered.discoveredIssuers,
+        failedDiscoveries: discovered.failedDiscoveries,
+        refreshedIssuers: refreshed.refreshedIssuers,
+        failedIssuers: refreshed.failedIssuers
+      };
+    } finally {
+      this.scheduler.inProgress = false;
+    }
+  }
+
+  private async requestJson(url: string): Promise<JsonRequestResult> {
+    for (let attempt = 1; attempt <= this.maxRefreshAttempts; attempt += 1) {
+      const controller = new AbortController();
+      let timeout: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error("Identity provider request timed out."));
+          controller.abort();
+        }, this.requestTimeoutMs);
+      });
+      let shouldRetry = false;
+
+      try {
+        const requestPromise = (async (): Promise<FetchAttemptResult> => {
+          const response = await this.fetchFn(url, { signal: controller.signal });
+          if (!response.ok) {
+            return { kind: "http", status: response.status };
+          }
+          try {
+            return { kind: "success", body: await response.json() };
+          } catch (error) {
+            if (error instanceof SyntaxError || (error instanceof Error && error.name === "SyntaxError")) {
+              return { kind: "invalid_json" };
+            }
+            throw error;
+          }
+        })();
+        const result = await Promise.race([requestPromise, timeoutPromise]);
+        if (result.kind === "success") {
+          return { ok: true, body: result.body };
+        }
+        if (result.kind === "invalid_json") {
+          return { ok: false, kind: "invalid_json" };
+        }
+        shouldRetry = attempt < this.maxRefreshAttempts && shouldRetryStatus(result.status);
+        if (!shouldRetry) {
+          return { ok: false, kind: "http" };
+        }
+      } catch {
+        shouldRetry = attempt < this.maxRefreshAttempts;
+        if (!shouldRetry) {
+          return { ok: false, kind: "network_or_timeout" };
+        }
+      } finally {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+      }
+
+      if (shouldRetry) {
+        await this.sleepFn(retryBackoffMs(attempt));
+      }
+    }
+
+    return { ok: false, kind: "network_or_timeout" };
   }
 }

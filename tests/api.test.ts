@@ -3,8 +3,9 @@ import { createHmac, generateKeyPairSync, sign as cryptoSign } from "node:crypto
 import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../src/api/server.js";
+import { JwksService } from "../src/core/services/jwks-service.js";
 import { createPlatformContext } from "../src/core/services/platform-context.js";
 import { createId } from "../src/lib/id.js";
 import type { PlatformContextOptions } from "../src/core/services/platform-context.js";
@@ -123,6 +124,10 @@ function cleanup(paths: string[]): void {
 }
 
 describe("OARS API", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("executes low-risk action without approval and emits verifiable receipt chain", async () => {
     const { app, baseDir, dataFilePath, keyFilePath } = createTestServer();
     try {
@@ -2708,6 +2713,236 @@ describe("OARS API", () => {
     }
   });
 
+  it("bounds a never-ending jwks request and resets refresh scheduler progress", async () => {
+    vi.useFakeTimers();
+    const issuer = "https://timeout-idp.example.test";
+    const fetchFn = vi.fn((_input: string, _init?: RequestInit) => new Promise<never>(() => {}));
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-timeout-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      requestTimeoutMs: 100,
+      maxRefreshAttempts: 1
+    });
+
+    const startPromise = service.startAutoRefresh(30, false);
+    expect(service.schedulerStatus().inProgress).toBe(true);
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(startPromise).resolves.toMatchObject({
+      running: true,
+      inProgress: false,
+      lastResult: {
+        failedIssuers: [issuer]
+      }
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(service.schedulerStatus().inProgress).toBe(false);
+    service.stopAutoRefresh();
+  });
+
+  it("retries a transient jwks 503 response and loads signing keys", async () => {
+    const issuer = "https://retry-idp.example.test";
+    const sleepFn = vi.fn(async (_ms: number) => undefined);
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ keys: [{ kid: "kid_retry", kty: "RSA", use: "sig", alg: "RS256" }] })
+      });
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-retry-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      maxRefreshAttempts: 2,
+      sleepFn
+    });
+
+    await expect(service.refreshIssuer(issuer)).resolves.toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(sleepFn).toHaveBeenCalledWith(100);
+    expect(service.getSigningKey(issuer, "kid_retry")).toMatchObject({ kid: "kid_retry" });
+  });
+
+  it("retries a jwks response body transport failure and then loads signing keys", async () => {
+    const issuer = "https://body-failure-idp.example.test";
+    const sleepFn = vi.fn(async (_ms: number) => undefined);
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new TypeError("response body terminated");
+        }
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ keys: [{ kid: "kid_body_retry", kty: "RSA", use: "sig", alg: "RS256" }] })
+      });
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-body-failure-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      maxRefreshAttempts: 2,
+      sleepFn
+    });
+
+    await expect(service.refreshIssuer(issuer)).resolves.toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(sleepFn).toHaveBeenCalledWith(100);
+    expect(service.getSigningKey(issuer, "kid_body_retry")).toMatchObject({ kid: "kid_body_retry" });
+  });
+
+  it("does not retry successful jwks responses with invalid JSON or body shape", async () => {
+    const invalidJsonIssuer = "https://invalid-json-idp.example.test";
+    const invalidJsonFetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError("invalid JSON");
+      }
+    }));
+    const invalidJsonService = new JwksService({
+      trustedProviders: [
+        {
+          issuer: invalidJsonIssuer,
+          audience: "oars-invalid-json-api",
+          jwksUri: `${invalidJsonIssuer}/keys`
+        }
+      ],
+      fetchFn: invalidJsonFetch,
+      maxRefreshAttempts: 2,
+      sleepFn: async () => undefined
+    });
+
+    await expect(invalidJsonService.refreshIssuer(invalidJsonIssuer)).resolves.toBe(false);
+    expect(invalidJsonFetch).toHaveBeenCalledTimes(1);
+
+    const invalidBodyIssuer = "https://invalid-body-idp.example.test";
+    const invalidBodyFetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ issuer: invalidBodyIssuer })
+    }));
+    const invalidBodyService = new JwksService({
+      trustedProviders: [
+        {
+          issuer: invalidBodyIssuer,
+          audience: "oars-invalid-body-api",
+          jwksUri: `${invalidBodyIssuer}/keys`
+        }
+      ],
+      fetchFn: invalidBodyFetch,
+      maxRefreshAttempts: 2,
+      sleepFn: async () => undefined
+    });
+
+    await expect(invalidBodyService.refreshIssuer(invalidBodyIssuer)).resolves.toBe(false);
+    expect(invalidBodyFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to safe jwks attempt defaults for an out-of-range option", async () => {
+    const issuer = "https://attempt-bounds-idp.example.test";
+    const fetchFn = vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) }));
+    const sleepFn = vi.fn(async (_ms: number) => undefined);
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-attempt-bounds-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      maxRefreshAttempts: 0,
+      sleepFn
+    });
+
+    await expect(service.refreshIssuer(issuer)).resolves.toBe(false);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(sleepFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the safe jwks timeout default below the lower bound", async () => {
+    vi.useFakeTimers();
+    const issuer = "https://timeout-bounds-idp.example.test";
+    const fetchFn = vi.fn((_input: string, _init?: RequestInit) => new Promise<never>(() => {}));
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-timeout-bounds-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      requestTimeoutMs: 99,
+      maxRefreshAttempts: 1
+    });
+
+    let settled = false;
+    const refreshPromise = service.refreshIssuer(issuer);
+    void refreshPromise.then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(refreshPromise).resolves.toBe(false);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves last-known-good jwks keys after refresh attempts fail", async () => {
+    const issuer = "https://cached-idp.example.test";
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ keys: [{ kid: "kid_cached", kty: "RSA", use: "sig", alg: "RS256" }] })
+      })
+      .mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-cached-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      maxRefreshAttempts: 2,
+      sleepFn: async () => undefined
+    });
+
+    await expect(service.refreshIssuer(issuer)).resolves.toBe(true);
+    expect(service.getSigningKey(issuer, "kid_cached")).toMatchObject({ kid: "kid_cached" });
+
+    await expect(service.refreshIssuer(issuer)).resolves.toBe(false);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(service.getSigningKey(issuer, "kid_cached")).toMatchObject({ kid: "kid_cached" });
+    expect(service.listProviders()[0]).toMatchObject({ keyCount: 1 });
+  });
+
   it("syncs scim users/groups into tenant members using role mappings", async () => {
     const { app, dataFilePath, keyFilePath } = createTestServer();
     try {
@@ -2753,6 +2988,20 @@ describe("OARS API", () => {
       });
       expect(upsertUser2.statusCode).toBe(201);
 
+      const upsertOwnerCollisionUser = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/scim/users",
+        headers: adminAuthHeader,
+        payload: {
+          externalId: "u-owner-collision",
+          userName: "owner@example.com",
+          displayName: "Owner Collision",
+          emails: ["owner@example.com"],
+          active: true
+        }
+      });
+      expect(upsertOwnerCollisionUser.statusCode).toBe(201);
+
       const listUsersPage1 = await app.inject({
         method: "GET",
         url: "/v1/admin/tenants/tenant_alpha/scim/users?page=1&pageSize=1",
@@ -2760,7 +3009,7 @@ describe("OARS API", () => {
       });
       expect(listUsersPage1.statusCode).toBe(200);
       const usersPage1 = listUsersPage1.json();
-      expect(usersPage1.total).toBe(2);
+      expect(usersPage1.total).toBe(3);
       expect(usersPage1.page).toBe(1);
       expect(usersPage1.pageSize).toBe(1);
       expect(usersPage1.items).toHaveLength(1);
@@ -2772,7 +3021,7 @@ describe("OARS API", () => {
         payload: {
           externalId: "g-admins",
           displayName: "IdP Admins",
-          memberExternalUserIds: ["u-active-1", "u-inactive-1"]
+          memberExternalUserIds: ["u-active-1", "u-inactive-1", "u-owner-collision"]
         }
       });
       expect(upsertGroup.statusCode).toBe(201);
@@ -2804,6 +3053,28 @@ describe("OARS API", () => {
       expect(listMappings.statusCode).toBe(200);
       expect(listMappings.json().total).toBe(1);
 
+      const createManualMember = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/members",
+        headers: adminAuthHeader,
+        payload: {
+          subject: "manual@example.com",
+          role: "operator"
+        }
+      });
+      expect(createManualMember.statusCode).toBe(201);
+
+      const createOwnerCollision = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/members",
+        headers: adminAuthHeader,
+        payload: {
+          subject: "owner@example.com",
+          role: "owner"
+        }
+      });
+      expect(createOwnerCollision.statusCode).toBe(201);
+
       const syncResponse = await app.inject({
         method: "POST",
         url: "/v1/admin/tenants/tenant_alpha/scim/sync",
@@ -2812,6 +3083,7 @@ describe("OARS API", () => {
       expect(syncResponse.statusCode).toBe(200);
       const syncPayload = syncResponse.json();
       expect(syncPayload.assignedCount).toBe(1);
+      expect(syncPayload.removedCount).toBe(0);
       expect(syncPayload.skippedInactiveCount).toBe(1);
 
       const membersResponse = await app.inject({
@@ -2827,6 +3099,55 @@ describe("OARS API", () => {
       expect(
         membersPayload.items.some((member: { subject: string }) => member.subject === "bob@example.com")
       ).toBe(false);
+      expect(
+        membersPayload.items.some(
+          (member: { subject: string; role: string }) => member.subject === "manual@example.com" && member.role === "operator"
+        )
+      ).toBe(true);
+      expect(
+        membersPayload.items.some(
+          (member: { subject: string; role: string }) => member.subject === "owner@example.com" && member.role === "owner"
+        )
+      ).toBe(true);
+
+      const removeActiveUserFromGroup = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/scim/groups",
+        headers: adminAuthHeader,
+        payload: {
+          externalId: "g-admins",
+          displayName: "IdP Admins",
+          memberExternalUserIds: ["u-inactive-1", "u-owner-collision"]
+        }
+      });
+      expect(removeActiveUserFromGroup.statusCode).toBe(201);
+
+      const reconcileResponse = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/scim/sync",
+        headers: adminAuthHeader
+      });
+      expect(reconcileResponse.statusCode).toBe(200);
+      expect(reconcileResponse.json()).toMatchObject({
+        assignedCount: 0,
+        removedCount: 1,
+        skippedInactiveCount: 1
+      });
+
+      const membersAfterReconcile = await app.inject({
+        method: "GET",
+        url: "/v1/admin/tenants/tenant_alpha/members",
+        headers: adminAuthHeader
+      });
+      expect(membersAfterReconcile.statusCode).toBe(200);
+      const reconciledMembers = membersAfterReconcile.json().items as Array<{ subject: string; role: string }>;
+      expect(reconciledMembers.some((member) => member.subject === "alice@example.com")).toBe(false);
+      expect(
+        reconciledMembers.some((member) => member.subject === "manual@example.com" && member.role === "operator")
+      ).toBe(true);
+      expect(
+        reconciledMembers.some((member) => member.subject === "owner@example.com" && member.role === "owner")
+      ).toBe(true);
 
       const forbiddenDeprovision = await app.inject({
         method: "POST",
@@ -2861,6 +3182,32 @@ describe("OARS API", () => {
           .json()
           .items.some((member: { subject: string }) => member.subject === "alice@example.com")
       ).toBe(false);
+
+      const deprovisionOwnerResponse = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/scim/deprovision",
+        headers: adminAuthHeader,
+        payload: {
+          externalId: "u-owner-collision"
+        }
+      });
+      expect(deprovisionOwnerResponse.statusCode).toBe(200);
+      expect(deprovisionOwnerResponse.json().active).toBe(false);
+
+      const membersAfterOwnerDeprovision = await app.inject({
+        method: "GET",
+        url: "/v1/admin/tenants/tenant_alpha/members",
+        headers: adminAuthHeader
+      });
+      expect(membersAfterOwnerDeprovision.statusCode).toBe(200);
+      expect(
+        membersAfterOwnerDeprovision
+          .json()
+          .items.some(
+            (member: { subject: string; role: string }) =>
+              member.subject === "owner@example.com" && member.role === "owner"
+          )
+      ).toBe(true);
     } finally {
       await app.close();
       cleanup([dataFilePath, keyFilePath]);

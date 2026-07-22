@@ -12,13 +12,13 @@ Implemented in codebase:
 2. Token auth with scoped authorization and tenant access enforcement.
 3. JWT access token issuance and verification (`HS256`) with issuer/audience enforcement.
 4. External IdP federation support via trusted JWKS providers and `RS256` JWT verification.
-5. OIDC discovery support (`/.well-known/openid-configuration`) to resolve JWKS URIs.
-6. JWKS background refresh scheduler with start/stop/status controls.
+5. OIDC discovery support (`/.well-known/openid-configuration`) to resolve JWKS URIs with bounded request timeout and retry behavior.
+6. JWKS background refresh scheduler with start/stop/status controls and in-memory last-known-good key preservation after refresh failures; keys are not persisted across process restarts.
 7. Admin APIs to list trusted providers, discovery, and refresh operations.
 8. OAuth-style delegated token exchange endpoint for agent execution context.
 9. Service account lifecycle for client credentials and token minting.
 10. SCIM user/group ingestion APIs with tenant-scoped storage.
-11. SCIM group-to-role mapping and membership sync into tenant RBAC.
+11. SCIM group-to-role mapping and authoritative membership reconciliation into tenant RBAC; stale access is revoked only for subjects represented by SCIM users, while owners are preserved during sync and explicit deprovisioning and unrelated manual members remain untouched.
 12. Policy evaluation with published policy support and default baseline policy.
 13. Approval workflow with approve/reject state transitions.
 14. Connector registry with pluggable tool execution and sandbox target checks.
@@ -30,7 +30,7 @@ Implemented in codebase:
 20. JSON-backed persistent storage for actions, approvals, receipts, policies, alerts, tenant members, security events, and service accounts.
 21. Evidence export endpoint for scoped compliance artifacts.
 22. Integration tests covering allow path, approval-required path, alerts/events, unauthorized access, admin role enforcement, delegated token exchange, service-account auth flows, external federated RS256 tokens, OIDC discovery, and scheduler controls.
-23. Integration tests for SCIM sync flow with role mapping and inactive-user handling.
+23. Integration tests for SCIM sync flow with role mapping, inactive-user handling, conservative stale-access revocation, and owner/manual-member preservation.
 24. SIEM adapter pipeline with vendor targets (`generic_webhook`, `splunk_hec`, `datadog_logs`, `sentinel_log_analytics`).
 25. SIEM retry queue with scheduler controls and manual flush endpoint.
 26. Integration tests for SIEM retry behavior and queue drain.
@@ -109,6 +109,7 @@ Implemented in codebase:
 99. Embedded TypeScript SDK module added under `src/sdk/*` with package subpath export (`oars-platform/sdk`) and tests using an injected fetch adapter.
 100. Compliance control mappings support receipt filtering tags (`receiptFilters`) and receipt search supports querying by `framework` + `controlId`; tests cover control-tag filtering and missing mapping errors.
 101. Postgres-backed platform store implemented (`OARS_STORE=postgres`) with docker-compose reference (`docker-compose.postgres.yml`) and docker-backed integration tests.
+102. Lifecycle-managed idempotency-record retention performs best-effort startup and recurring pruning with a configurable replay TTL; action, receipt, security-event, and audit-evidence retention is unaffected.
 
 ## Implemented Source Map
 
@@ -120,6 +121,7 @@ Implemented in codebase:
 - Data protection: `src/core/services/data-protection-service.ts`
 - Operations dashboard/routing: `src/core/services/operations-service.ts`
 - JWKS federation: `src/core/services/jwks-service.ts`
+- Idempotency retention: `src/core/services/idempotency-retention-service.ts`
 - SCIM sync: `src/core/services/scim-service.ts`
 - SIEM delivery: `src/core/services/siem-delivery-service.ts`
 - Immutable ledger: `src/core/services/immutable-ledger-service.ts`
@@ -145,6 +147,7 @@ Implemented in codebase:
 - Tests: `tests/api.test.ts`
 - SDK: `src/sdk/index.ts`
 - SDK Tests: `tests/sdk.test.ts`
+- Idempotency Retention Tests: `tests/idempotency-retention.test.ts`
 
 ## Validation Results
 
@@ -155,7 +158,7 @@ Implemented in codebase:
 
 ## Remaining For Full Production Scope
 
-1. OIDC/SCIM resilience hardening (provider cache policy, conflict resolution, authoritative precedence rules).
+1. OIDC/SCIM resilience hardening (persistent cross-process JWKS cache policy and remaining conflict-resolution rules).
 2. Advanced policy model completion (staged rollout controls, deeper explainability artifacts, delegated attribute attestation for context fields).
 3. Production-grade KMS/HSM integration for at-rest field encryption key lifecycle.
 4. Pilot-to-GA commercialization activities and external ecosystem certification onboarding.

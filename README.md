@@ -127,6 +127,12 @@ All `/v1/*` endpoints require `Authorization: Bearer <token>`.
 
 Mutating endpoints may accept `Idempotency-Key` to safely replay requests.
 
+Idempotency records have a configurable minimum replay window (24 hours by default). Records become eligible for
+pruning after `OARS_IDEMPOTENCY_TTL_SECONDS` and may remain until the next
+`OARS_IDEMPOTENCY_PRUNE_INTERVAL_SECONDS` cycle. Reusing a key after its record is pruned is treated as a new request.
+This retention applies only to idempotency replay records; actions, receipts, security events, and audit evidence are
+not pruned by this scheduler.
+
 Default dev tokens:
 
 - `dev_admin_token`
@@ -180,6 +186,8 @@ Runtime config:
 - `OARS_TRUSTED_JWKS` JSON array of trusted external IdP providers (issuer/audience/JWKS)
 - `OARS_JWKS_AUTO_REFRESH_ENABLED` enable background JWKS refresh scheduler (`true`/`false`)
 - `OARS_JWKS_AUTO_REFRESH_INTERVAL_SECONDS` scheduler interval in seconds (minimum `30`)
+- `OARS_IDEMPOTENCY_TTL_SECONDS` minimum idempotency replay window in seconds (default `86400`, minimum `60`)
+- `OARS_IDEMPOTENCY_PRUNE_INTERVAL_SECONDS` idempotency prune interval in seconds (default `3600`, minimum `30`)
 - `OARS_APPROVAL_STEP_UP_SECRET` shared step-up code required for critical approval decisions (default `stepup_dev_code`)
 - `OARS_IMMUTABLE_LEDGER_PATH` append-only immutable ledger file path for receipts and security events
 - `OARS_VAULT_KEY` encryption secret for connector vault entries (default is development-only value)

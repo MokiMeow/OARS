@@ -32,6 +32,7 @@ interface UpsertScimGroupInput {
 
 interface SyncResult {
   assignedCount: number;
+  removedCount: number;
   skippedInactiveCount: number;
   unmappedGroupCount: number;
 }
@@ -152,7 +153,12 @@ export class ScimService {
     user.active = false;
     user.updatedAt = nowIso();
     await this.store.saveScimUser(user);
-    await this.tenantAdminService.removeMember(tenantId, user.userName, actor);
+    const matchingMember = (await this.tenantAdminService.listMembers(tenantId)).find(
+      (member) => member.subject === user.userName
+    );
+    if (matchingMember?.role !== "owner") {
+      await this.tenantAdminService.removeMember(tenantId, user.userName, actor);
+    }
     await this.securityEventService.publish({
       tenantId,
       source: "admin",
@@ -235,7 +241,12 @@ export class ScimService {
     const mappings = await this.store.listScimRoleMappingsByTenant(tenantId);
     const users = await this.store.listScimUsersByTenant(tenantId);
     const usersByExternalId = new Map(users.map((user) => [user.externalId, user]));
+    const scimKnownSubjects = new Set(users.map((user) => user.userName));
     const roleByGroupName = new Map(mappings.map((mapping) => [mapping.groupDisplayName, mapping.role]));
+    const currentMembers = await this.tenantAdminService.listMembers(tenantId);
+    const ownerSubjects = new Set(
+      currentMembers.filter((member) => member.role === "owner").map((member) => member.subject)
+    );
 
     const resolvedBySubject = new Map<string, Exclude<TenantRole, "owner">>();
     let skippedInactiveCount = 0;
@@ -265,8 +276,28 @@ export class ScimService {
       }
     }
 
-    for (const [subject, role] of resolvedBySubject.entries()) {
+    const staleSubjects = currentMembers
+      .filter(
+        (member) =>
+          !ownerSubjects.has(member.subject) &&
+          scimKnownSubjects.has(member.subject) &&
+          !resolvedBySubject.has(member.subject)
+      )
+      .map((member) => member.subject)
+      .sort((left, right) => left.localeCompare(right));
+    const assignments = [...resolvedBySubject.entries()].filter(
+      ([subject]) => !ownerSubjects.has(subject)
+    );
+
+    for (const [subject, role] of assignments) {
       await this.tenantAdminService.upsertMember(tenantId, subject, role, actor);
+    }
+
+    let removedCount = 0;
+    for (const subject of staleSubjects) {
+      if (await this.tenantAdminService.removeMember(tenantId, subject, actor)) {
+        removedCount += 1;
+      }
     }
 
     await this.securityEventService.publish({
@@ -274,7 +305,8 @@ export class ScimService {
       source: "admin",
       eventType: "scim.sync.completed",
       payload: {
-        assignedCount: resolvedBySubject.size,
+        assignedCount: assignments.length,
+        removedCount,
         skippedInactiveCount,
         unmappedGroupCount,
         actor
@@ -282,7 +314,8 @@ export class ScimService {
     });
 
     return {
-      assignedCount: resolvedBySubject.size,
+      assignedCount: assignments.length,
+      removedCount,
       skippedInactiveCount,
       unmappedGroupCount
     };
