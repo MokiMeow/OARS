@@ -239,6 +239,9 @@ export class ScimService {
     const scimKnownSubjects = new Set(users.map((user) => user.userName));
     const roleByGroupName = new Map(mappings.map((mapping) => [mapping.groupDisplayName, mapping.role]));
     const currentMembers = await this.tenantAdminService.listMembers(tenantId);
+    const ownerSubjects = new Set(
+      currentMembers.filter((member) => member.role === "owner").map((member) => member.subject)
+    );
 
     const resolvedBySubject = new Map<string, Exclude<TenantRole, "owner">>();
     let skippedInactiveCount = 0;
@@ -271,14 +274,17 @@ export class ScimService {
     const staleSubjects = currentMembers
       .filter(
         (member) =>
-          member.role !== "owner" &&
+          !ownerSubjects.has(member.subject) &&
           scimKnownSubjects.has(member.subject) &&
           !resolvedBySubject.has(member.subject)
       )
       .map((member) => member.subject)
       .sort((left, right) => left.localeCompare(right));
+    const assignments = [...resolvedBySubject.entries()].filter(
+      ([subject]) => !ownerSubjects.has(subject)
+    );
 
-    for (const [subject, role] of resolvedBySubject.entries()) {
+    for (const [subject, role] of assignments) {
       await this.tenantAdminService.upsertMember(tenantId, subject, role, actor);
     }
 
@@ -294,7 +300,7 @@ export class ScimService {
       source: "admin",
       eventType: "scim.sync.completed",
       payload: {
-        assignedCount: resolvedBySubject.size,
+        assignedCount: assignments.length,
         removedCount,
         skippedInactiveCount,
         unmappedGroupCount,
@@ -303,7 +309,7 @@ export class ScimService {
     });
 
     return {
-      assignedCount: resolvedBySubject.size,
+      assignedCount: assignments.length,
       removedCount,
       skippedInactiveCount,
       unmappedGroupCount

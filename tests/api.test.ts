@@ -2786,7 +2786,7 @@ describe("OARS API", () => {
         payload: {
           externalId: "g-admins",
           displayName: "IdP Admins",
-          memberExternalUserIds: ["u-active-1", "u-inactive-1"]
+          memberExternalUserIds: ["u-active-1", "u-inactive-1", "u-owner-collision"]
         }
       });
       expect(upsertGroup.statusCode).toBe(201);
@@ -2882,7 +2882,7 @@ describe("OARS API", () => {
         payload: {
           externalId: "g-admins",
           displayName: "IdP Admins",
-          memberExternalUserIds: ["u-inactive-1"]
+          memberExternalUserIds: ["u-inactive-1", "u-owner-collision"]
         }
       });
       expect(removeActiveUserFromGroup.statusCode).toBe(201);
