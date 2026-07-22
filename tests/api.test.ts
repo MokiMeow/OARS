@@ -2753,6 +2753,20 @@ describe("OARS API", () => {
       });
       expect(upsertUser2.statusCode).toBe(201);
 
+      const upsertOwnerCollisionUser = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/scim/users",
+        headers: adminAuthHeader,
+        payload: {
+          externalId: "u-owner-collision",
+          userName: "owner@example.com",
+          displayName: "Owner Collision",
+          emails: ["owner@example.com"],
+          active: true
+        }
+      });
+      expect(upsertOwnerCollisionUser.statusCode).toBe(201);
+
       const listUsersPage1 = await app.inject({
         method: "GET",
         url: "/v1/admin/tenants/tenant_alpha/scim/users?page=1&pageSize=1",
@@ -2760,7 +2774,7 @@ describe("OARS API", () => {
       });
       expect(listUsersPage1.statusCode).toBe(200);
       const usersPage1 = listUsersPage1.json();
-      expect(usersPage1.total).toBe(2);
+      expect(usersPage1.total).toBe(3);
       expect(usersPage1.page).toBe(1);
       expect(usersPage1.pageSize).toBe(1);
       expect(usersPage1.items).toHaveLength(1);
@@ -2804,6 +2818,28 @@ describe("OARS API", () => {
       expect(listMappings.statusCode).toBe(200);
       expect(listMappings.json().total).toBe(1);
 
+      const createManualMember = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/members",
+        headers: adminAuthHeader,
+        payload: {
+          subject: "manual@example.com",
+          role: "operator"
+        }
+      });
+      expect(createManualMember.statusCode).toBe(201);
+
+      const createOwnerCollision = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/members",
+        headers: adminAuthHeader,
+        payload: {
+          subject: "owner@example.com",
+          role: "owner"
+        }
+      });
+      expect(createOwnerCollision.statusCode).toBe(201);
+
       const syncResponse = await app.inject({
         method: "POST",
         url: "/v1/admin/tenants/tenant_alpha/scim/sync",
@@ -2812,6 +2848,7 @@ describe("OARS API", () => {
       expect(syncResponse.statusCode).toBe(200);
       const syncPayload = syncResponse.json();
       expect(syncPayload.assignedCount).toBe(1);
+      expect(syncPayload.removedCount).toBe(0);
       expect(syncPayload.skippedInactiveCount).toBe(1);
 
       const membersResponse = await app.inject({
@@ -2827,6 +2864,55 @@ describe("OARS API", () => {
       expect(
         membersPayload.items.some((member: { subject: string }) => member.subject === "bob@example.com")
       ).toBe(false);
+      expect(
+        membersPayload.items.some(
+          (member: { subject: string; role: string }) => member.subject === "manual@example.com" && member.role === "operator"
+        )
+      ).toBe(true);
+      expect(
+        membersPayload.items.some(
+          (member: { subject: string; role: string }) => member.subject === "owner@example.com" && member.role === "owner"
+        )
+      ).toBe(true);
+
+      const removeActiveUserFromGroup = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/scim/groups",
+        headers: adminAuthHeader,
+        payload: {
+          externalId: "g-admins",
+          displayName: "IdP Admins",
+          memberExternalUserIds: ["u-inactive-1"]
+        }
+      });
+      expect(removeActiveUserFromGroup.statusCode).toBe(201);
+
+      const reconcileResponse = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/scim/sync",
+        headers: adminAuthHeader
+      });
+      expect(reconcileResponse.statusCode).toBe(200);
+      expect(reconcileResponse.json()).toMatchObject({
+        assignedCount: 0,
+        removedCount: 1,
+        skippedInactiveCount: 1
+      });
+
+      const membersAfterReconcile = await app.inject({
+        method: "GET",
+        url: "/v1/admin/tenants/tenant_alpha/members",
+        headers: adminAuthHeader
+      });
+      expect(membersAfterReconcile.statusCode).toBe(200);
+      const reconciledMembers = membersAfterReconcile.json().items as Array<{ subject: string; role: string }>;
+      expect(reconciledMembers.some((member) => member.subject === "alice@example.com")).toBe(false);
+      expect(
+        reconciledMembers.some((member) => member.subject === "manual@example.com" && member.role === "operator")
+      ).toBe(true);
+      expect(
+        reconciledMembers.some((member) => member.subject === "owner@example.com" && member.role === "owner")
+      ).toBe(true);
 
       const forbiddenDeprovision = await app.inject({
         method: "POST",

@@ -32,6 +32,7 @@ interface UpsertScimGroupInput {
 
 interface SyncResult {
   assignedCount: number;
+  removedCount: number;
   skippedInactiveCount: number;
   unmappedGroupCount: number;
 }
@@ -235,7 +236,9 @@ export class ScimService {
     const mappings = await this.store.listScimRoleMappingsByTenant(tenantId);
     const users = await this.store.listScimUsersByTenant(tenantId);
     const usersByExternalId = new Map(users.map((user) => [user.externalId, user]));
+    const scimKnownSubjects = new Set(users.map((user) => user.userName));
     const roleByGroupName = new Map(mappings.map((mapping) => [mapping.groupDisplayName, mapping.role]));
+    const currentMembers = await this.tenantAdminService.listMembers(tenantId);
 
     const resolvedBySubject = new Map<string, Exclude<TenantRole, "owner">>();
     let skippedInactiveCount = 0;
@@ -265,8 +268,25 @@ export class ScimService {
       }
     }
 
+    const staleSubjects = currentMembers
+      .filter(
+        (member) =>
+          member.role !== "owner" &&
+          scimKnownSubjects.has(member.subject) &&
+          !resolvedBySubject.has(member.subject)
+      )
+      .map((member) => member.subject)
+      .sort((left, right) => left.localeCompare(right));
+
     for (const [subject, role] of resolvedBySubject.entries()) {
       await this.tenantAdminService.upsertMember(tenantId, subject, role, actor);
+    }
+
+    let removedCount = 0;
+    for (const subject of staleSubjects) {
+      if (await this.tenantAdminService.removeMember(tenantId, subject, actor)) {
+        removedCount += 1;
+      }
     }
 
     await this.securityEventService.publish({
@@ -275,6 +295,7 @@ export class ScimService {
       eventType: "scim.sync.completed",
       payload: {
         assignedCount: resolvedBySubject.size,
+        removedCount,
         skippedInactiveCount,
         unmappedGroupCount,
         actor
@@ -283,6 +304,7 @@ export class ScimService {
 
     return {
       assignedCount: resolvedBySubject.size,
+      removedCount,
       skippedInactiveCount,
       unmappedGroupCount
     };

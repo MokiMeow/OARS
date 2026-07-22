@@ -18,7 +18,7 @@ Implemented in codebase:
 8. OAuth-style delegated token exchange endpoint for agent execution context.
 9. Service account lifecycle for client credentials and token minting.
 10. SCIM user/group ingestion APIs with tenant-scoped storage.
-11. SCIM group-to-role mapping and membership sync into tenant RBAC.
+11. SCIM group-to-role mapping and authoritative membership reconciliation into tenant RBAC; stale access is revoked only for subjects represented by SCIM users, while owners and unrelated manual members are preserved.
 12. Policy evaluation with published policy support and default baseline policy.
 13. Approval workflow with approve/reject state transitions.
 14. Connector registry with pluggable tool execution and sandbox target checks.
@@ -30,7 +30,7 @@ Implemented in codebase:
 20. JSON-backed persistent storage for actions, approvals, receipts, policies, alerts, tenant members, security events, and service accounts.
 21. Evidence export endpoint for scoped compliance artifacts.
 22. Integration tests covering allow path, approval-required path, alerts/events, unauthorized access, admin role enforcement, delegated token exchange, service-account auth flows, external federated RS256 tokens, OIDC discovery, and scheduler controls.
-23. Integration tests for SCIM sync flow with role mapping and inactive-user handling.
+23. Integration tests for SCIM sync flow with role mapping, inactive-user handling, conservative stale-access revocation, and owner/manual-member preservation.
 24. SIEM adapter pipeline with vendor targets (`generic_webhook`, `splunk_hec`, `datadog_logs`, `sentinel_log_analytics`).
 25. SIEM retry queue with scheduler controls and manual flush endpoint.
 26. Integration tests for SIEM retry behavior and queue drain.
@@ -155,7 +155,7 @@ Implemented in codebase:
 
 ## Remaining For Full Production Scope
 
-1. OIDC/SCIM resilience hardening (provider cache policy, conflict resolution, authoritative precedence rules).
+1. OIDC/SCIM resilience hardening (provider cache policy and remaining conflict-resolution rules).
 2. Advanced policy model completion (staged rollout controls, deeper explainability artifacts, delegated attribute attestation for context fields).
 3. Production-grade KMS/HSM integration for at-rest field encryption key lifecycle.
 4. Pilot-to-GA commercialization activities and external ecosystem certification onboarding.
