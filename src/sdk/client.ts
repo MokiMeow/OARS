@@ -14,6 +14,36 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const MAX_RETRY_DELAY_MS = 30_000;
+
+function exponentialRetryDelayMs(attempt: number): number {
+  return Math.min(200 * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS);
+}
+
+function retryAfterDelayMs(value: string | null, nowMs: number): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    if (Number.isFinite(seconds)) {
+      return Math.min(seconds * 1_000, MAX_RETRY_DELAY_MS);
+    }
+  }
+
+  const retryAtMs = Date.parse(trimmed);
+  if (!Number.isNaN(retryAtMs)) {
+    const delayMs = retryAtMs - nowMs;
+    if (delayMs >= 0) {
+      return Math.min(delayMs, MAX_RETRY_DELAY_MS);
+    }
+  }
+
+  return null;
+}
+
 function toUrl(baseUrl: string, path: string, query?: Record<string, unknown>): string {
   const url = new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
   if (query) {
@@ -115,55 +145,57 @@ export class OarsClient {
       attempt += 1;
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      let response: Response;
       try {
-        const response = await this.fetchFn(url, {
+        response = await this.fetchFn(url, {
           method,
           headers,
           ...(body !== undefined ? { body } : {}),
           signal: controller.signal
         });
-
-        if (response.ok) {
-          return (await response.json()) as T;
-        }
-
-        let errorPayload: OarsApiErrorBody | null = null;
-        try {
-          errorPayload = (await response.json()) as OarsApiErrorBody;
-        } catch {
-          errorPayload = null;
-        }
-
-        if (options?.retryMode === "safe" && attempt < maxAttempts && shouldRetry(response.status)) {
-          await sleep(200 * 2 ** (attempt - 1));
-          continue;
-        }
-
-        if (errorPayload?.error?.code && errorPayload.error.message) {
-          throw new OarsHttpError({
-            status: response.status,
-            code: errorPayload.error.code,
-            message: errorPayload.error.message,
-            ...(errorPayload.error.requestId ? { requestId: errorPayload.error.requestId } : {}),
-            ...(errorPayload.error.details !== undefined ? { details: errorPayload.error.details } : {})
-          });
-        }
-        throw new OarsHttpError({
-          status: response.status,
-          code: "http_error",
-          message: `HTTP ${response.status}`
-        });
       } catch (error) {
         lastError = error;
         const retryable = options?.retryMode === "safe" && attempt < maxAttempts;
         if (retryable) {
-          await sleep(200 * 2 ** (attempt - 1));
+          await sleep(exponentialRetryDelayMs(attempt));
           continue;
         }
         throw error;
       } finally {
         clearTimeout(timeout);
       }
+
+      if (response.ok) {
+        return (await response.json()) as T;
+      }
+
+      let errorPayload: OarsApiErrorBody | null = null;
+      try {
+        errorPayload = (await response.json()) as OarsApiErrorBody;
+      } catch {
+        errorPayload = null;
+      }
+
+      if (options?.retryMode === "safe" && attempt < maxAttempts && shouldRetry(response.status)) {
+        const retryDelayMs = retryAfterDelayMs(response.headers.get("retry-after"), Date.now()) ?? exponentialRetryDelayMs(attempt);
+        await sleep(retryDelayMs);
+        continue;
+      }
+
+      if (errorPayload?.error?.code && errorPayload.error.message) {
+        throw new OarsHttpError({
+          status: response.status,
+          code: errorPayload.error.code,
+          message: errorPayload.error.message,
+          ...(errorPayload.error.requestId ? { requestId: errorPayload.error.requestId } : {}),
+          ...(errorPayload.error.details !== undefined ? { details: errorPayload.error.details } : {})
+        });
+      }
+      throw new OarsHttpError({
+        status: response.status,
+        code: "http_error",
+        message: `HTTP ${response.status}`
+      });
     }
 
     throw lastError instanceof Error ? lastError : new Error("Request failed.");

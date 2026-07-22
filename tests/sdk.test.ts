@@ -1,11 +1,11 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../src/api/server.js";
 import { createPlatformContext } from "../src/core/services/platform-context.js";
 import { createId } from "../src/lib/id.js";
-import { OarsClient } from "../src/sdk/index.js";
+import { OarsClient, OarsHttpError } from "../src/sdk/index.js";
 import type { PlatformContextOptions } from "../src/core/services/platform-context.js";
 
 function cleanup(paths: string[]): void {
@@ -94,6 +94,10 @@ function createInjectFetch(app: { inject: (opts: any) => Promise<any> }): typeof
 }
 
 describe("OARS SDK", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("wraps action submission, idempotency replay, receipt verification, and receipt listing", async () => {
     const { app, cleanupPaths } = createTestServer();
     try {
@@ -164,5 +168,113 @@ describe("OARS SDK", () => {
       await app.close();
       cleanup(cleanupPaths);
     }
+  });
+
+  it("does not retry non-retryable HTTP responses", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "not_found", message: "Missing action" } }), {
+        status: 404,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const client = new OarsClient({
+      baseUrl: "http://localhost",
+      token: "test-token",
+      fetchFn,
+      maxRetries: 2
+    });
+
+    const error = await client.getAction("missing").catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(OarsHttpError);
+    expect(error).toMatchObject({ status: 404, code: "not_found" });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a transient HTTP response and then succeeds", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ action: { id: "act_retry" }, receipts: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    const client = new OarsClient({
+      baseUrl: "http://localhost",
+      token: "test-token",
+      fetchFn,
+      maxRetries: 1
+    });
+
+    const request = client.getAction("act_retry");
+    await vi.advanceTimersByTimeAsync(200);
+
+    await expect(request).resolves.toMatchObject({ action: { id: "act_retry" } });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a network failure and then succeeds", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("network unavailable"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ action: { id: "act_network" }, receipts: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    const client = new OarsClient({
+      baseUrl: "http://localhost",
+      token: "test-token",
+      fetchFn,
+      maxRetries: 1
+    });
+
+    const request = client.getAction("act_network");
+    await vi.advanceTimersByTimeAsync(200);
+
+    await expect(request).resolves.toMatchObject({ action: { id: "act_network" } });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { label: "delta seconds", retryAfter: "2", expectedDelayMs: 2_000 },
+    { label: "HTTP date", retryAfter: "Tue, 01 Jan 2030 00:00:05 GMT", expectedDelayMs: 5_000 },
+    { label: "malformed value", retryAfter: "later", expectedDelayMs: 200 },
+    { label: "negative value", retryAfter: "-1", expectedDelayMs: 200 },
+    { label: "capped value", retryAfter: "60", expectedDelayMs: 30_000 }
+  ])("uses the expected delay for a $label Retry-After header", async ({ retryAfter, expectedDelayMs }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 503, headers: { "retry-after": retryAfter } }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ action: { id: "act_retry_after" }, receipts: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    const client = new OarsClient({
+      baseUrl: "http://localhost",
+      token: "test-token",
+      fetchFn,
+      maxRetries: 1
+    });
+
+    const request = client.getAction("act_retry_after");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(expectedDelayMs - 1);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(request).resolves.toMatchObject({ action: { id: "act_retry_after" } });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });

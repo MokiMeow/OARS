@@ -47,6 +47,6 @@ const verification = await client.verifyReceipt({ receiptId: result.receiptId })
 
 - Auth: sends `Authorization: Bearer <token>`.
 - Idempotency: sends `Idempotency-Key` when provided; the SDK only retries `submitAction` when an idempotency key is set.
-- Retries: `GET` and receipt verification are retried by default on transient HTTP errors (timeouts/429/5xx), configurable via `maxRetries`.
+- Retries: safe requests are retried by default for transport failures and transient HTTP statuses (`408`, `425`, `429`, and `5xx`), configurable via `maxRetries`; other HTTP errors are returned without retrying.
+- Backoff: retryable HTTP responses honor valid `Retry-After` delta seconds or HTTP dates, capped at 30 seconds; missing, malformed, negative, or past values use exponential backoff.
 - Timeouts: configurable via `timeoutMs`.
-
