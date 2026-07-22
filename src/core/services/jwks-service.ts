@@ -486,8 +486,11 @@ export class JwksService {
           }
           try {
             return { kind: "success", body: await response.json() };
-          } catch {
-            return { kind: "invalid_json" };
+          } catch (error) {
+            if (error instanceof SyntaxError || (error instanceof Error && error.name === "SyntaxError")) {
+              return { kind: "invalid_json" };
+            }
+            throw error;
           }
         })();
         const result = await Promise.race([requestPromise, timeoutPromise]);

@@ -2775,6 +2775,42 @@ describe("OARS API", () => {
     expect(service.getSigningKey(issuer, "kid_retry")).toMatchObject({ kid: "kid_retry" });
   });
 
+  it("retries a jwks response body transport failure and then loads signing keys", async () => {
+    const issuer = "https://body-failure-idp.example.test";
+    const sleepFn = vi.fn(async (_ms: number) => undefined);
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new TypeError("response body terminated");
+        }
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ keys: [{ kid: "kid_body_retry", kty: "RSA", use: "sig", alg: "RS256" }] })
+      });
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-body-failure-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      maxRefreshAttempts: 2,
+      sleepFn
+    });
+
+    await expect(service.refreshIssuer(issuer)).resolves.toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(sleepFn).toHaveBeenCalledWith(100);
+    expect(service.getSigningKey(issuer, "kid_body_retry")).toMatchObject({ kid: "kid_body_retry" });
+  });
+
   it("does not retry successful jwks responses with invalid JSON or body shape", async () => {
     const invalidJsonIssuer = "https://invalid-json-idp.example.test";
     const invalidJsonFetch = vi.fn(async () => ({
@@ -2821,6 +2857,58 @@ describe("OARS API", () => {
 
     await expect(invalidBodyService.refreshIssuer(invalidBodyIssuer)).resolves.toBe(false);
     expect(invalidBodyFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to safe jwks attempt defaults for an out-of-range option", async () => {
+    const issuer = "https://attempt-bounds-idp.example.test";
+    const fetchFn = vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) }));
+    const sleepFn = vi.fn(async (_ms: number) => undefined);
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-attempt-bounds-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      maxRefreshAttempts: 0,
+      sleepFn
+    });
+
+    await expect(service.refreshIssuer(issuer)).resolves.toBe(false);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(sleepFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the safe jwks timeout default below the lower bound", async () => {
+    vi.useFakeTimers();
+    const issuer = "https://timeout-bounds-idp.example.test";
+    const fetchFn = vi.fn((_input: string, _init?: RequestInit) => new Promise<never>(() => {}));
+    const service = new JwksService({
+      trustedProviders: [
+        {
+          issuer,
+          audience: "oars-timeout-bounds-api",
+          jwksUri: `${issuer}/keys`
+        }
+      ],
+      fetchFn,
+      requestTimeoutMs: 99,
+      maxRefreshAttempts: 1
+    });
+
+    let settled = false;
+    const refreshPromise = service.refreshIssuer(issuer);
+    void refreshPromise.then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(refreshPromise).resolves.toBe(false);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it("preserves last-known-good jwks keys after refresh attempts fail", async () => {
