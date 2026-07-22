@@ -18,7 +18,7 @@ Implemented in codebase:
 8. OAuth-style delegated token exchange endpoint for agent execution context.
 9. Service account lifecycle for client credentials and token minting.
 10. SCIM user/group ingestion APIs with tenant-scoped storage.
-11. SCIM group-to-role mapping and authoritative membership reconciliation into tenant RBAC; stale access is revoked only for subjects represented by SCIM users, while owners and unrelated manual members are preserved.
+11. SCIM group-to-role mapping and authoritative membership reconciliation into tenant RBAC; stale access is revoked only for subjects represented by SCIM users, while owners are preserved during sync and explicit deprovisioning and unrelated manual members remain untouched.
 12. Policy evaluation with published policy support and default baseline policy.
 13. Approval workflow with approve/reject state transitions.
 14. Connector registry with pluggable tool execution and sandbox target checks.

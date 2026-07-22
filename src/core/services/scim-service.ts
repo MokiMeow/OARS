@@ -153,7 +153,12 @@ export class ScimService {
     user.active = false;
     user.updatedAt = nowIso();
     await this.store.saveScimUser(user);
-    await this.tenantAdminService.removeMember(tenantId, user.userName, actor);
+    const matchingMember = (await this.tenantAdminService.listMembers(tenantId)).find(
+      (member) => member.subject === user.userName
+    );
+    if (matchingMember?.role !== "owner") {
+      await this.tenantAdminService.removeMember(tenantId, user.userName, actor);
+    }
     await this.securityEventService.publish({
       tenantId,
       source: "admin",

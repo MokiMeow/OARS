@@ -2947,6 +2947,32 @@ describe("OARS API", () => {
           .json()
           .items.some((member: { subject: string }) => member.subject === "alice@example.com")
       ).toBe(false);
+
+      const deprovisionOwnerResponse = await app.inject({
+        method: "POST",
+        url: "/v1/admin/tenants/tenant_alpha/scim/deprovision",
+        headers: adminAuthHeader,
+        payload: {
+          externalId: "u-owner-collision"
+        }
+      });
+      expect(deprovisionOwnerResponse.statusCode).toBe(200);
+      expect(deprovisionOwnerResponse.json().active).toBe(false);
+
+      const membersAfterOwnerDeprovision = await app.inject({
+        method: "GET",
+        url: "/v1/admin/tenants/tenant_alpha/members",
+        headers: adminAuthHeader
+      });
+      expect(membersAfterOwnerDeprovision.statusCode).toBe(200);
+      expect(
+        membersAfterOwnerDeprovision
+          .json()
+          .items.some(
+            (member: { subject: string; role: string }) =>
+              member.subject === "owner@example.com" && member.role === "owner"
+          )
+      ).toBe(true);
     } finally {
       await app.close();
       cleanup([dataFilePath, keyFilePath]);
