@@ -12,8 +12,8 @@ Implemented in codebase:
 2. Token auth with scoped authorization and tenant access enforcement.
 3. JWT access token issuance and verification (`HS256`) with issuer/audience enforcement.
 4. External IdP federation support via trusted JWKS providers and `RS256` JWT verification.
-5. OIDC discovery support (`/.well-known/openid-configuration`) to resolve JWKS URIs.
-6. JWKS background refresh scheduler with start/stop/status controls.
+5. OIDC discovery support (`/.well-known/openid-configuration`) to resolve JWKS URIs with bounded request timeout and retry behavior.
+6. JWKS background refresh scheduler with start/stop/status controls and in-memory last-known-good key preservation after refresh failures; keys are not persisted across process restarts.
 7. Admin APIs to list trusted providers, discovery, and refresh operations.
 8. OAuth-style delegated token exchange endpoint for agent execution context.
 9. Service account lifecycle for client credentials and token minting.
@@ -155,7 +155,7 @@ Implemented in codebase:
 
 ## Remaining For Full Production Scope
 
-1. OIDC/SCIM resilience hardening (provider cache policy and remaining conflict-resolution rules).
+1. OIDC/SCIM resilience hardening (persistent cross-process JWKS cache policy and remaining conflict-resolution rules).
 2. Advanced policy model completion (staged rollout controls, deeper explainability artifacts, delegated attribute attestation for context fields).
 3. Production-grade KMS/HSM integration for at-rest field encryption key lifecycle.
 4. Pilot-to-GA commercialization activities and external ecosystem certification onboarding.
