@@ -109,6 +109,7 @@ Implemented in codebase:
 99. Embedded TypeScript SDK module added under `src/sdk/*` with package subpath export (`oars-platform/sdk`) and tests using an injected fetch adapter.
 100. Compliance control mappings support receipt filtering tags (`receiptFilters`) and receipt search supports querying by `framework` + `controlId`; tests cover control-tag filtering and missing mapping errors.
 101. Postgres-backed platform store implemented (`OARS_STORE=postgres`) with docker-compose reference (`docker-compose.postgres.yml`) and docker-backed integration tests.
+102. Lifecycle-managed idempotency-record retention performs best-effort startup and recurring pruning with a configurable replay TTL; action, receipt, security-event, and audit-evidence retention is unaffected.
 
 ## Implemented Source Map
 
@@ -120,6 +121,7 @@ Implemented in codebase:
 - Data protection: `src/core/services/data-protection-service.ts`
 - Operations dashboard/routing: `src/core/services/operations-service.ts`
 - JWKS federation: `src/core/services/jwks-service.ts`
+- Idempotency retention: `src/core/services/idempotency-retention-service.ts`
 - SCIM sync: `src/core/services/scim-service.ts`
 - SIEM delivery: `src/core/services/siem-delivery-service.ts`
 - Immutable ledger: `src/core/services/immutable-ledger-service.ts`
@@ -145,6 +147,7 @@ Implemented in codebase:
 - Tests: `tests/api.test.ts`
 - SDK: `src/sdk/index.ts`
 - SDK Tests: `tests/sdk.test.ts`
+- Idempotency Retention Tests: `tests/idempotency-retention.test.ts`
 
 ## Validation Results
 

@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { readFileSync } from "node:fs";
+import { IdempotencyRetentionService } from "../core/services/idempotency-retention-service.js";
 import { createPlatformContext, type PlatformContext } from "../core/services/platform-context.js";
 import { authHeaderFromHeaders, handleError, requestIdFromHeaders } from "./http.js";
 import { registerActionRoutes } from "./routes/actions.js";
@@ -74,6 +75,12 @@ export function buildServer(context = createPlatformContext()) {
     bodyLimit: bodyLimitBytes,
     ...(https ? { https } : {})
   });
+  const idempotencyRetentionService = new IdempotencyRetentionService(context.store, {
+    ttlSeconds: Number(process.env.OARS_IDEMPOTENCY_TTL_SECONDS),
+    intervalSeconds: Number(process.env.OARS_IDEMPOTENCY_PRUNE_INTERVAL_SECONDS)
+  });
+  void idempotencyRetentionService.runOnce();
+  idempotencyRetentionService.start();
 
   // When configured, derive workload identity from a verified TLS client certificate.
   // This keeps the rest of the auth pipeline unchanged (ServiceIdentityService reads the same headers),
@@ -201,6 +208,7 @@ export function buildServer(context = createPlatformContext()) {
 
   app.addHook("onClose", async () => {
     clearInterval(ratePurgeTimer);
+    idempotencyRetentionService.stop();
     context.jwksService.stopAutoRefresh();
     context.securityEventService.stopSiemRetryScheduler();
     await context.executionBackplane?.close?.();
