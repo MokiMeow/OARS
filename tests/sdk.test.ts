@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../src/api/server.js";
 import { createPlatformContext } from "../src/core/services/platform-context.js";
 import { createId } from "../src/lib/id.js";
-import { OarsClient, OarsHttpError } from "../src/sdk/index.js";
+import { OarsClient, OarsHttpError, type ActionSubmission } from "../src/sdk/index.js";
 import type { PlatformContextOptions } from "../src/core/services/platform-context.js";
 
 function cleanup(paths: string[]): void {
@@ -93,6 +93,23 @@ function createInjectFetch(app: { inject: (opts: any) => Promise<any> }): typeof
   }) as unknown as typeof fetch;
 }
 
+const testActionSubmission: ActionSubmission = {
+  tenantId: "tenant_alpha",
+  agentId: "agent_sdk",
+  context: {
+    environment: "prod",
+    dataTypes: ["pii"]
+  },
+  resource: {
+    toolId: "jira",
+    operation: "create_ticket",
+    target: "project:SEC"
+  },
+  input: {
+    summary: "SDK retry test"
+  }
+};
+
 describe("OARS SDK", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -170,10 +187,13 @@ describe("OARS SDK", () => {
     }
   });
 
-  it("does not retry non-retryable HTTP responses", async () => {
+  it.each([
+    { status: 401, code: "unauthorized" },
+    { status: 404, code: "not_found" }
+  ])("does not retry a structured $status HTTP response", async ({ status, code }) => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ error: { code: "not_found", message: "Missing action" } }), {
-        status: 404,
+      new Response(JSON.stringify({ error: { code, message: "Request failed", requestId: "req_structured" } }), {
+        status,
         headers: { "content-type": "application/json" }
       })
     );
@@ -187,15 +207,15 @@ describe("OARS SDK", () => {
     const error = await client.getAction("missing").catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(OarsHttpError);
-    expect(error).toMatchObject({ status: 404, code: "not_found" });
+    expect(error).toMatchObject({ status, code, requestId: "req_structured" });
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it("retries a transient HTTP response and then succeeds", async () => {
+  it("retries a previously omitted 5xx response and then succeeds", async () => {
     vi.useFakeTimers();
     const fetchFn = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 501 }))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ action: { id: "act_retry" }, receipts: [] }), {
           status: 200,
@@ -239,6 +259,81 @@ describe("OARS SDK", () => {
 
     await expect(request).resolves.toMatchObject({ action: { id: "act_network" } });
     expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps response body consumption bounded by timeout and safe retry limits", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn<typeof fetch>(async (_input, init) => {
+      const signal = init?.signal;
+      const responseBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const abort = () => controller.error(new DOMException("The operation was aborted.", "AbortError"));
+          if (signal?.aborted) {
+            abort();
+          } else {
+            signal?.addEventListener("abort", abort, { once: true });
+          }
+        }
+      });
+      return new Response(responseBody, {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const client = new OarsClient({
+      baseUrl: "http://localhost",
+      token: "test-token",
+      fetchFn,
+      timeoutMs: 100,
+      maxRetries: 1
+    });
+
+    const request = client.getAction("act_stalled_body");
+    const rejection = expect(request).rejects.toMatchObject({ name: "AbortError" });
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(199);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(100);
+
+    await rejection;
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a transient response for action submission without an idempotency key", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 503 }));
+    const client = new OarsClient({
+      baseUrl: "http://localhost",
+      token: "test-token",
+      fetchFn,
+      maxRetries: 2
+    });
+
+    const error = await client.submitAction(testActionSubmission).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(OarsHttpError);
+    expect(error).toMatchObject({ status: 503, code: "http_error" });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a transport failure for action submission without an idempotency key", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("network unavailable"));
+    const client = new OarsClient({
+      baseUrl: "http://localhost",
+      token: "test-token",
+      fetchFn,
+      maxRetries: 2
+    });
+
+    const error = await client.submitAction(testActionSubmission).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(error).toMatchObject({ message: "network unavailable" });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it.each([
