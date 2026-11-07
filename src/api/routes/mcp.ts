@@ -5,13 +5,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod/v4";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import type { TokenClaims } from "../../core/types/auth.js";
 import { McpProxyService } from "../../core/mcp/mcp-proxy-service.js";
-import { authHeaderFromHeaders, authenticate, requestIdFromHeaders } from "../http.js";
+import { authHeaderFromHeaders, authenticate, HttpError, requireTenantAccess, requestIdFromHeaders } from "../http.js";
 
 type SessionEntry = {
   transport: StreamableHTTPServerTransport;
   server: McpServer;
   createdAt: number;
+  subject: string;
+  tenantId: string;
 };
 
 function parseAllowedOrigins(raw: string | undefined): string[] | null {
@@ -34,7 +38,7 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
   const sessions = new Map<string, SessionEntry>();
   const allowedOrigins = parseAllowedOrigins(process.env.OARS_MCP_ALLOWED_ORIGINS);
 
-  async function createSession(): Promise<{ transport: StreamableHTTPServerTransport; server: McpServer }> {
+  async function createSession(subject: string, tenantId: string): Promise<{ transport: StreamableHTTPServerTransport; server: McpServer }> {
     let transport: StreamableHTTPServerTransport | null = null;
     transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
@@ -44,6 +48,8 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
         sessions.set(sessionId, {
           transport: transport!,
           server: server!,
+          subject,
+          tenantId,
           createdAt: Date.now()
         });
         transport!.onclose = () => {
@@ -68,6 +74,17 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
       }
     );
 
+    // Never capture initializing claims: each tool uses the current HTTP request's
+    // verified credentials, so renewed/reduced tokens cannot retain old privileges.
+    function authorizeTool(authInfo: AuthInfo | undefined, headers: Record<string, unknown>, scope: string): void {
+      if (!authInfo) throw new Error("Missing authentication context.");
+      const claims = authenticate(context, { ...headers, authorization: authInfo.token }, scope);
+      requireTenantAccess(context, claims, tenantId);
+      if (claims.subject !== subject || authInfo.extra?.tenantId !== tenantId) {
+        throw new Error("MCP session principal or tenant mismatch.");
+      }
+    }
+
     server.registerTool(
       "oars_get_action",
       {
@@ -77,17 +94,19 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
           actionId: z.string()
         }
       },
-      async ({ actionId }) => {
+      async ({ actionId }, extra) => {
+        authorizeTool(extra.authInfo, (extra.requestInfo?.headers ?? {}) as Record<string, unknown>, "actions:read");
         const action = await context.actionService.getAction(actionId);
+        if (!action || action.tenantId !== tenantId) throw new Error("Action not found.");
         return {
           content: [
             {
               type: "text",
-              text: action ? `Action ${actionId}: ${action.state}` : `Action not found: ${actionId}`
+              text: `Action ${actionId}: ${action.state}`
             }
           ],
           structuredContent: {
-            action: action ?? null
+            action
           }
         };
       }
@@ -102,7 +121,10 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
           actionId: z.string()
         }
       },
-      async ({ actionId }) => {
+      async ({ actionId }, extra) => {
+        authorizeTool(extra.authInfo, (extra.requestInfo?.headers ?? {}) as Record<string, unknown>, "receipts:read");
+        const action = await context.actionService.getAction(actionId);
+        if (!action || action.tenantId !== tenantId) throw new Error("Action not found.");
         const receipts = await context.store.listReceiptsByAction(actionId);
         return {
           content: [
@@ -128,16 +150,7 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
           inputSchema: z.record(z.string(), z.unknown())
         },
         async (args, extra) => {
-          const authInfo = extra.authInfo;
-          const extraData = authInfo?.extra as { tenantId?: unknown; subject?: unknown } | undefined;
-          const tenantId = typeof extraData?.tenantId === "string" ? extraData.tenantId : null;
-          const subject = typeof extraData?.subject === "string" ? extraData.subject : authInfo?.clientId ?? "unknown";
-          if (!tenantId) {
-            return {
-              content: [{ type: "text", text: "Missing tenant context for MCP tool call." }],
-              isError: true
-            };
-          }
+          authorizeTool(extra.authInfo, (extra.requestInfo?.headers ?? {}) as Record<string, unknown>, "actions:write");
 
           const requestId = requestIdFromHeaders(
             (extra.requestInfo?.headers ?? {}) as unknown as Record<string, unknown>
@@ -208,17 +221,23 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
       return reply.status(403).send({ error: { code: "cors_forbidden", message: "Origin is not allowed." } });
     }
 
-    // Authenticate once per HTTP request and pass through to MCP handlers via req.auth (SDK convention).
-    const claims = authenticate(context, headers, "actions:write");
+    // Authenticate every HTTP request; tools enforce their own scopes below.
+    // Pass request-local credentials through req.auth (SDK convention).
+    let claims: TokenClaims;
+    try {
+      claims = context.authService.authenticate(authHeaderFromHeaders(headers));
+    } catch (error) {
+      throw new HttpError(401, "unauthorized", error instanceof Error ? error.message : "Unauthorized.");
+    }
+    try {
+      context.serviceIdentityService.enforceRequestIdentity(claims, headers);
+    } catch (error) {
+      throw new HttpError(403, "mtls_identity_required", error instanceof Error ? error.message : "Forbidden.");
+    }
     const tenantHeader = headers["x-oars-tenant-id"];
     const requestedTenant =
       typeof tenantHeader === "string" && tenantHeader.trim().length > 0 ? tenantHeader.trim() : null;
-    const tenantId =
-      claims.tenantIds.length === 1
-        ? claims.tenantIds[0]!
-        : requestedTenant && claims.tenantIds.includes(requestedTenant)
-          ? requestedTenant
-          : null;
+    const tenantId = requestedTenant ?? (claims.tenantIds.length === 1 ? claims.tenantIds[0]! : null);
     if (!tenantId) {
       return reply.status(400).send({
         error: {
@@ -227,6 +246,8 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
         }
       });
     }
+
+    requireTenantAccess(context, claims, tenantId);
 
     (request.raw as unknown as { auth?: unknown }).auth = {
       token: authHeaderFromHeaders(headers) ?? "",
@@ -246,6 +267,12 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
     let entry: SessionEntry | null = null;
     if (sessionId) {
       entry = sessions.get(sessionId) ?? null;
+      if (!entry) {
+        return reply.status(404).send({ error: { code: "session_not_found", message: "MCP session not found." } });
+      }
+      if (entry.subject !== claims.subject || entry.tenantId !== tenantId) {
+        return reply.status(403).send({ error: { code: "session_forbidden", message: "MCP session access denied." } });
+      }
     }
 
     if (!entry) {
@@ -257,11 +284,13 @@ export function registerMcpRoutes(app: FastifyInstance, context: PlatformContext
           }
         });
       }
-      const created = await createSession();
+      const created = await createSession(claims.subject, tenantId);
       entry = {
         transport: created.transport,
         server: created.server,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        subject: claims.subject,
+        tenantId
       };
     }
 

@@ -3,7 +3,8 @@
 ## Development Setup
 
 Prereqs:
-- Node.js `>=22`
+- Node.js `>=24`
+- npm `11.16.0` (matches `packageManager` and CI)
 
 Install:
 

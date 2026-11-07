@@ -150,7 +150,9 @@ Example:
 curl -X GET "http://localhost:8080/v1/connectors" -H "Authorization: Bearer dev_admin_token"
 ```
 
-If `OARS_MTLS_ENABLED=true`, `service`-role tokens must present a workload identity. Supported modes:
+If `OARS_MTLS_ENABLED=true`, `service`-role tokens must present a workload identity.
+Token exchange preserves the service role and service-account binding, so delegated
+service tokens require the same workload identity checks. Supported modes:
 
 - `OARS_MTLS_MODE=header` (legacy): clients (or a trusted mTLS-terminating proxy) must forward headers:
   - `x-oars-mtls-subject`

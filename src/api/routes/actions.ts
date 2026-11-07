@@ -132,11 +132,16 @@ export function registerActionRoutes(app: FastifyInstance, context: PlatformCont
       requireTenantAccess(context, claims, approval.tenantId);
 
       const payload = approvalDecisionSchema.parse(request.body);
+      // Approval identity must come from authentication, never a caller-selected
+      // name (including for admins with action impersonation privileges).
+      if (payload.approverId !== undefined && payload.approverId !== claims.subject) {
+        throw new HttpError(403, "forbidden", "Approval decisions must use the authenticated subject.");
+      }
       const requestId = requestIdFromHeaders(request.headers as Record<string, unknown>);
       const result = await context.actionService.handleApprovalDecision(
         params.approvalId,
         payload.decision,
-        payload.approverId,
+        claims.subject,
         payload.reason,
         requestId,
         payload.stepUpCode

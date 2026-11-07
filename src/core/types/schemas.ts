@@ -82,7 +82,7 @@ export const actionSubmissionSchema = z.preprocess(
 export const approvalDecisionSchema = z.object({
   decision: z.enum(["approve", "reject"]),
   reason: z.string().min(3),
-  approverId: z.string().min(1),
+  approverId: z.string().min(1).optional(),
   stepUpCode: z.string().min(1).optional()
 });
 

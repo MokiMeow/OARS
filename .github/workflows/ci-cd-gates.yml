@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, codex/oars-security-validation-20261107]
 
 permissions:
   contents: read
@@ -38,6 +38,14 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Verify Docker runtime
+        run: |
+          docker version
+          docker info
+
+      - name: Test Postgres integrations
+        run: npm run test:docker
 
       - name: Build
         run: npm run build

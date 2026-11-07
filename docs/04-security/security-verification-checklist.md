@@ -39,4 +39,17 @@ This checklist is intended to be run before any production deployment.
   - signature validation on `POST /v1/receipts/verify`
   - key rotation continuity using `GET /v1/trust/tenants/:tenantId/keys`
   - immutable ledger verification (if enabled) via `GET /v1/admin/ledger/verify`
+  - mutation of nested `__proto__` JSON fields fails integrity verification
+
+Canonical serialization preserves prototype-named properties as data. Historical
+payloads containing an own `__proto__` key were not fully covered by earlier
+hashes and will fail verification with the corrected serializer. Investigate and
+retain the original evidence if this occurs; do not rewrite hashes to hide the
+failure. Ordinary JSON payloads retain their existing serialization.
+
+## Implementation References
+
+- [OWASP authorization guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html): enforce permissions on each request and test authorization boundaries.
+- [MDN prototype pollution guidance](https://developer.mozilla.org/en-US/docs/Web/Security/Attacks/Prototype_pollution): use null-prototype objects when copying arbitrary JSON keys.
+- [MCP authorization and session references](../03-architecture/mcp-proxy.md#authorization-references).
 

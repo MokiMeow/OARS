@@ -45,6 +45,7 @@ function createTestServer(options?: PlatformContextOptions) {
   const app = buildServer(context);
   return {
     app,
+    context,
     baseDir,
     dataFilePath,
     keyFilePath,
@@ -54,6 +55,16 @@ function createTestServer(options?: PlatformContextOptions) {
     drillReportsPath,
     drillWorkspacePath
   };
+}
+
+function approvalAuthHeader(context: ReturnType<typeof createPlatformContext>, subject: string) {
+  const { accessToken } = context.authService.issueToken({
+    subject,
+    tenantIds: ["tenant_alpha", "tenant_bravo"],
+    scopes: ["approvals:write"],
+    role: "operator"
+  });
+  return { authorization: `Bearer ${accessToken}` };
 }
 
 function signRs256Token(input: {
@@ -389,7 +400,7 @@ describe("OARS API", () => {
   });
 
   it("requires approval for high-risk action and executes after approval", async () => {
-    const { app, dataFilePath, keyFilePath } = createTestServer();
+    const { app, context, dataFilePath, keyFilePath } = createTestServer();
     try {
       const actionResponse = await app.inject({
         method: "POST",
@@ -420,7 +431,7 @@ describe("OARS API", () => {
       const approveResponse = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "security_manager"),
         payload: {
           decision: "approve",
           approverId: "security_manager",
@@ -534,7 +545,7 @@ describe("OARS API", () => {
   });
 
   it("supports multi-stage approval chains with scoped approvers", async () => {
-    const { app, dataFilePath, keyFilePath } = createTestServer();
+    const { app, context, dataFilePath, keyFilePath } = createTestServer();
     try {
       const forbiddenWorkflowWrite = await app.inject({
         method: "POST",
@@ -615,7 +626,7 @@ describe("OARS API", () => {
       const unauthorizedApprover = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "random_user"),
         payload: {
           decision: "approve",
           approverId: "random_user",
@@ -627,7 +638,7 @@ describe("OARS API", () => {
       const stage1Approve = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "sec_lead"),
         payload: {
           decision: "approve",
           approverId: "sec_lead",
@@ -652,7 +663,7 @@ describe("OARS API", () => {
       const stage2Approve = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "business_owner"),
         payload: {
           decision: "approve",
           approverId: "business_owner",
@@ -670,7 +681,7 @@ describe("OARS API", () => {
   });
 
   it("supports parallel approval stages with required approval threshold", async () => {
-    const { app, dataFilePath, keyFilePath } = createTestServer();
+    const { app, context, dataFilePath, keyFilePath } = createTestServer();
     try {
       const setWorkflow = await app.inject({
         method: "POST",
@@ -721,7 +732,7 @@ describe("OARS API", () => {
       const firstParallelApprove = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "sec_a"),
         payload: {
           decision: "approve",
           approverId: "sec_a",
@@ -735,7 +746,7 @@ describe("OARS API", () => {
       const secondParallelApprove = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "sec_b"),
         payload: {
           decision: "approve",
           approverId: "sec_b",
@@ -749,7 +760,7 @@ describe("OARS API", () => {
       const finalApprove = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "business_owner"),
         payload: {
           decision: "approve",
           approverId: "business_owner",
@@ -765,8 +776,83 @@ describe("OARS API", () => {
     }
   });
 
+  it("binds approval votes to authenticated subjects and prevents forged quorum or rejection", async () => {
+    const { app, context, dataFilePath, keyFilePath } = createTestServer();
+    try {
+      await context.approvalService.upsertTenantWorkflow("tenant_bravo", [{
+        name: "Security quorum",
+        mode: "parallel",
+        requiredApprovals: 2,
+        approverIds: ["sec_a", "sec_b"]
+      }], "admin_user");
+      const submitted = await app.inject({
+        method: "POST",
+        url: "/v1/actions",
+        headers: adminAuthHeader,
+        payload: {
+          tenantId: "tenant_bravo",
+          agentId: "agent_approval_identity",
+          resource: { toolId: "iam", operation: "change_permissions", target: "prod:finance" },
+          input: { change: "grant_admin" }
+        }
+      });
+      expect(submitted.statusCode).toBe(202);
+      const { approvalId } = submitted.json();
+      expect(approvalId).toBeTruthy();
+      const url = `/v1/approvals/${approvalId}/decision`;
+
+      // Neither a normal operator nor an administrator with impersonate scope
+      // can supply another person's identity, for approvals OR rejections.
+      for (const headers of [operatorAuthHeader, adminAuthHeader]) {
+        for (const decision of ["approve", "reject"]) {
+          const forged = await app.inject({
+            method: "POST", url, headers,
+            payload: { decision, approverId: "sec_a", reason: "Forged identity", stepUpCode: "stepup_dev_code" }
+          });
+          expect(forged.statusCode).toBe(403);
+          expect(forged.json().error.code).toBe("forbidden");
+        }
+      }
+      expect((await context.approvalService.getApproval(approvalId))?.decisions).toHaveLength(0);
+
+      // Omitted legacy identity is taken from the token, not from the body.
+      const first = await app.inject({
+        method: "POST", url, headers: approvalAuthHeader(context, "sec_a"),
+        payload: { decision: "approve", reason: "First real vote", stepUpCode: "stepup_dev_code" }
+      });
+      expect(first.statusCode).toBe(202);
+      expect((await context.approvalService.getApproval(approvalId))?.decisions[0]?.approverId).toBe("sec_a");
+
+      const forgedSecond = await app.inject({
+        method: "POST", url, headers: approvalAuthHeader(context, "sec_a"),
+        payload: { decision: "approve", approverId: "sec_b", reason: "Forged second vote", stepUpCode: "stepup_dev_code" }
+      });
+      expect(forgedSecond.statusCode).toBe(403);
+      const duplicate = await app.inject({
+        method: "POST", url, headers: approvalAuthHeader(context, "sec_a"),
+        payload: { decision: "approve", approverId: "sec_a", reason: "Duplicate vote", stepUpCode: "stepup_dev_code" }
+      });
+      expect(duplicate.statusCode).toBe(400);
+      const pending = await context.approvalService.getApproval(approvalId);
+      expect(pending?.status).toBe("pending");
+      expect(pending?.decisions).toHaveLength(1);
+
+      const second = await app.inject({
+        method: "POST", url, headers: approvalAuthHeader(context, "sec_b"),
+        payload: { decision: "approve", approverId: "sec_b", reason: "Second real vote", stepUpCode: "stepup_dev_code" }
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.json().state).toBe("executed");
+      expect((await context.approvalService.getApproval(approvalId))?.decisions.map((entry) => entry.approverId))
+        .toEqual(["sec_a", "sec_b"]);
+    } finally {
+      await app.close();
+      cleanup([dataFilePath, keyFilePath]);
+    }
+  });
+
   it("requires step-up authentication for critical approval decisions", async () => {
-    const { app, dataFilePath, keyFilePath } = createTestServer();
+    const { app, context, dataFilePath, keyFilePath } = createTestServer();
     try {
       const actionResponse = await app.inject({
         method: "POST",
@@ -795,7 +881,7 @@ describe("OARS API", () => {
       const withoutStepUp = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "security_manager"),
         payload: {
           decision: "approve",
           approverId: "security_manager",
@@ -807,7 +893,7 @@ describe("OARS API", () => {
       const withStepUp = await app.inject({
         method: "POST",
         url: `/v1/approvals/${actionPayload.approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "security_manager"),
         payload: {
           decision: "approve",
           approverId: "security_manager",
@@ -1484,8 +1570,60 @@ describe("OARS API", () => {
     }
   });
 
+  it("preserves service-account mTLS binding through repeated token exchanges", async () => {
+    const serviceAccountId = "svc_bound";
+    const subject = "service_account:svc_bound";
+    const fingerprint = "a".repeat(64);
+    const { app, context, baseDir } = createTestServer({
+      serviceIdentityOptions: {
+        enabled: true,
+        trustedIdentities: [
+          { subject: "workload:bound", fingerprintSha256: fingerprint, serviceAccountId, tenantIds: ["tenant_alpha"] },
+          { subject: "workload:other", fingerprintSha256: "b".repeat(64), serviceAccountId: "svc_other", tenantIds: ["tenant_alpha"] }
+        ]
+      }
+    });
+    try {
+      const scopes = ["token:exchange", "connectors:read"];
+      let accessToken = context.authService.issueToken({
+        subject, tenantIds: ["tenant_alpha"], scopes, role: "service", serviceAccountId
+      }).accessToken;
+      const identity = { "x-oars-mtls-subject": "workload:bound", "x-oars-mtls-fingerprint": fingerprint };
+
+      for (let delegation = 0; delegation < 2; delegation += 1) {
+        const exchanged = await app.inject({
+          method: "POST", url: "/v1/auth/token/exchange",
+          headers: { authorization: `Bearer ${accessToken}`, ...identity },
+          payload: { tenantId: "tenant_alpha", agentId: `agent_${delegation}`, scopes }
+        });
+        expect(exchanged.statusCode).toBe(200);
+        accessToken = exchanged.json().accessToken;
+        const claims = context.authService.authenticate(`Bearer ${accessToken}`);
+        expect(claims.role).toBe("service");
+        expect(claims.serviceAccountId).toBe(serviceAccountId);
+        const missingIdentity = await app.inject({
+          method: "GET", url: "/v1/connectors", headers: { authorization: `Bearer ${accessToken}` }
+        });
+        expect(missingIdentity.statusCode).toBe(403);
+        expect(missingIdentity.json().error.code).toBe("mtls_identity_required");
+        const mismatchedIdentity = await app.inject({
+          method: "GET", url: "/v1/connectors",
+          headers: { authorization: `Bearer ${accessToken}`, "x-oars-mtls-subject": "workload:other", "x-oars-mtls-fingerprint": "b".repeat(64) }
+        });
+        expect(mismatchedIdentity.statusCode).toBe(403);
+        const authorized = await app.inject({
+          method: "GET", url: "/v1/connectors", headers: { authorization: `Bearer ${accessToken}`, ...identity }
+        });
+        expect(authorized.statusCode).toBe(200);
+      }
+    } finally {
+      await app.close();
+      cleanup([baseDir]);
+    }
+  });
+
   it("provides ops dashboard metrics and supports alert routing updates", async () => {
-    const { app, dataFilePath, keyFilePath } = createTestServer();
+    const { app, context, dataFilePath, keyFilePath } = createTestServer();
     try {
       const actionResponse = await app.inject({
         method: "POST",
@@ -1511,7 +1649,7 @@ describe("OARS API", () => {
       const approve = await app.inject({
         method: "POST",
         url: `/v1/approvals/${approvalId}/decision`,
-        headers: adminAuthHeader,
+        headers: approvalAuthHeader(context, "ops_security_manager"),
         payload: {
           decision: "approve",
           approverId: "ops_security_manager",

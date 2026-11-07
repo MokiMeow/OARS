@@ -28,6 +28,7 @@ This documentation is structured to drive full implementation, deployment, and a
 - `04-security/security-architecture.md`
 - `04-security/threat-model.md`
 - `04-security/security-verification-checklist.md`
+- `04-security/dependency-audit.md`
 - `05-compliance/compliance-mapping.md`
 - `05-compliance/evidence-operations.md`
 - `06-delivery/full-build-plan.md`

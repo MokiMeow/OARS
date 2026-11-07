@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createId } from "../src/lib/id.js";
@@ -97,6 +97,23 @@ describe("ImmutableLedgerService", () => {
 
     const result = ledger.listEntriesByTenant("tenant_alpha", 100);
     expect(result.items.length).toBe(2);
+  });
+
+  it("detects tampering with prototype-named keys in nested event payloads", () => {
+    ensureDir(testDataDir);
+    const ledgerPath = join(testDataDir, `ledger-${createId("t")}.ndjson`);
+    const ledger = new ImmutableLedgerService(ledgerPath);
+    const event = makeSecurityEvent("tenant_alpha");
+    event.payload = JSON.parse('{"details":{"__proto__":{"amount":1},"status":"approved"}}');
+    ledger.appendSecurityEvent(event);
+    expect(new ImmutableLedgerService(ledgerPath).verifyIntegrity().isValid).toBe(true);
+
+    const entry = JSON.parse(readFileSync(ledgerPath, "utf8").trim());
+    entry.payload.payload.details.__proto__.amount = 999;
+    writeFileSync(ledgerPath, `${JSON.stringify(entry)}\n`, "utf8");
+
+    expect(ledger.verifyIntegrity().isValid).toBe(false);
+    expect(() => new ImmutableLedgerService(ledgerPath)).toThrow("Payload hash mismatch");
   });
 });
 

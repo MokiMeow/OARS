@@ -84,12 +84,14 @@ Request:
 {
   "decision": "approve",
   "reason": "Business urgency validated",
-  "step_up_code": "string-when-required"
+  "stepUpCode": "string-when-required"
 }
 ```
 
 Notes:
 
+- The approver is the authenticated token subject and must have `approvals:write` and access to the approval tenant.
+- The optional legacy `approverId` field must equal that subject; mismatches return HTTP 403, including for administrators with impersonation privileges.
 - Approval workflows may include multiple stages.
 - If additional stages remain after an `approve` decision, response remains in `approval_required` state until final stage completion.
 - Stages may define SLA timers and escalation targets; overdue stages are escalated via admin scan endpoint.

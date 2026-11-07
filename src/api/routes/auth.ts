@@ -72,7 +72,10 @@ export function registerAuthRoutes(app: FastifyInstance, context: PlatformContex
         subject: requestedSubject,
         tenantIds: [payload.tenantId],
         scopes: requestedScopes,
-        role: "agent",
+        // A delegated service credential must retain its workload-identity
+        // requirement and account binding, including on repeated exchanges.
+        role: claims.role === "service" ? "service" : "agent",
+        ...(claims.serviceAccountId ? { serviceAccountId: claims.serviceAccountId } : {}),
         delegationChain: [claims.subject, payload.agentId, "oars-gateway"],
         ...(payload.expiresInSeconds ? { expiresInSeconds: payload.expiresInSeconds } : {})
       });
